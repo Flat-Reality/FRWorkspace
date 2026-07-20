@@ -30,8 +30,10 @@ FR-ADMIN
 - мобильная версия;
 - страница LevelUp! в боковом меню;
 - Work Records с account health и таймлайном;
+- Request explanation workflow для HR и пользователей;
 - Signed Documents открывает подписанные документы по ссылкам;
 - пустые страницы Benefits и Installs подготовлены;
+- Career Growth показывает текущий seniority;
 - Admin перестроен на модули HR, Guide Writting и LevelUp! Configurator;
 - Supabase-сохранение через таблицу `workspace_state`;
 - GitHub Pages custom domain файл `public/CNAME`;

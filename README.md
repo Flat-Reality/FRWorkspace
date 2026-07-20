@@ -30,7 +30,9 @@ FR-ADMIN
 - Dashboard with LevelUp! XP, rewards, and Jump To links.
 - Dedicated Rewards page.
 - Work Records with account health, timeline entries, strikes, and automatic strike expiry logic.
+- Request explanation workflow for HR and users.
 - Signed Documents, Benefits, and Installs pages.
+- Career Growth page with current seniority.
 - Read-only user profile with limited self-editable fields.
 - Modular Admin area: HR, Guide Writting, and LevelUp! Configurator.
 - HR profile tabs for Profile, Work Records, LevelUp!, Payments, and Documents.

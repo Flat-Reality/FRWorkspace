@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   BadgeCheck,
   Ban,
+  Bell,
   BookOpen,
   Brain,
   Building2,
@@ -29,6 +30,7 @@ import {
   Sparkles,
   Trash2,
   Trophy,
+  TrendingUp,
   UserRound,
   UsersRound,
   WalletCards,
@@ -52,7 +54,7 @@ import type {
   WorkspaceState,
 } from './types';
 
-type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs';
+type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth';
 type AdminModule = 'home' | 'hr' | 'guides' | 'levelup';
 type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents';
 
@@ -65,6 +67,7 @@ const iconMap: Record<string, LucideIcon> = {
   BookOpen,
   Building2,
   Trophy,
+  TrendingUp,
 };
 
 const statusOptions: Array<{ value: MemberStatus; label: string; icon: LucideIcon; needsDate: boolean; blocksLogin: boolean }> = [
@@ -80,6 +83,7 @@ const recordTypes: Array<{ value: WorkRecordType; label: string; icon: string }>
   { value: 'positive', label: 'Positive', icon: '🎉' },
   { value: 'strike', label: 'Strike', icon: '⚖' },
   { value: 'negative', label: 'Other negative', icon: '!' },
+  { value: 'explanation_request', label: 'Request explanation', icon: '!' },
 ];
 
 function today() {
@@ -115,10 +119,19 @@ function statusLabel(status: MemberStatus) {
 }
 
 function recordStyle(type: WorkRecordType) {
+  if (type === 'explanation_request') return { icon: '!', border: 'border-red-600', bg: 'bg-red-600' };
   if (type === 'positive') return { icon: '🎉', border: 'border-emerald-300', bg: 'bg-emerald-50' };
   if (type === 'strike') return { icon: '⚖', border: 'border-red-300', bg: 'bg-red-50' };
   if (type === 'negative') return { icon: '!', border: 'border-red-200', bg: 'bg-white' };
   return { icon: '✎', border: 'border-line', bg: 'bg-white' };
+}
+
+function sortRecordsNewestFirst(records: WorkRecord[]) {
+  return [...records].sort((a, b) => {
+    if (a.type === 'explanation_request' && b.type !== 'explanation_request') return -1;
+    if (b.type === 'explanation_request' && a.type !== 'explanation_request') return 1;
+    return (b.date || today()).localeCompare(a.date || today());
+  });
 }
 
 function normalizeMemberRuntime(member: WorkspaceMember) {
@@ -341,6 +354,7 @@ export default function App() {
     ['dashboard', LayoutDashboard, 'Dashboard'],
     ['profile', UserRound, 'Profile'],
     ['levelup', Trophy, 'LevelUp!'],
+    ['careerGrowth', TrendingUp, 'Career Growth'],
     ['guides', BookOpen, 'Guides'],
     ['benefits', HeartHandshake, 'Benefits'],
     ['installs', Download, 'Installs'],
@@ -463,12 +477,14 @@ export default function App() {
               nextRewards={nextRewards}
               progress={progress}
               jumpLinks={jumpLinks}
+              workRecords={workRecords}
               setView={setView}
             />
           )}
           {view === 'profile' && <Profile member={currentMember} updateCurrentMember={updateCurrentMember} />}
           {view === 'levelup' && <LevelUp member={currentMember} levels={levels} rewards={rewards} />}
-          {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} />}
+          {view === 'careerGrowth' && <CareerGrowth member={currentMember} />}
+          {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} setWorkRecords={setWorkRecords} />}
           {view === 'signedDocuments' && <SignedDocuments member={currentMember} />}
           {view === 'benefits' && <Placeholder title="Benefits" text="We are working on integrating this feature into Workspace!" />}
           {view === 'installs' && <Placeholder title="Installs" text="Install access will be added here later." />}
@@ -503,6 +519,7 @@ function Dashboard({
   nextRewards,
   progress,
   jumpLinks,
+  workRecords,
   setView,
 }: {
   member: WorkspaceMember;
@@ -511,8 +528,12 @@ function Dashboard({
   nextRewards: Reward[];
   progress: number;
   jumpLinks: JumpLink[];
+  workRecords: WorkRecord[];
   setView: (view: View) => void;
 }) {
+  const pendingUserRequest = workRecords.find((record) => record.memberId === member.id && record.type === 'explanation_request' && !record.explanationText);
+  const unreadExplanationCount = member.isAdmin ? workRecords.filter((record) => record.type === 'explanation_request' && record.explanationText).length : 0;
+
   return (
     <>
       <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
@@ -525,8 +546,37 @@ function Dashboard({
           <div className="flex items-start gap-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white text-2xl shadow-soft">👋</div>
             <div>
-              <h2 className="text-2xl font-semibold">Завершите онбординг!</h2>
-              <p className="mt-2 text-zinc-600">Получите 100 XP.</p>
+              <h2 className="text-2xl font-semibold">Complete onboarding</h2>
+              <p className="mt-2 text-zinc-600">Earn 100 XP.</p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {pendingUserRequest && (
+        <section className="rounded-xl border border-red-600 bg-red-600 p-6 text-white shadow-soft">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-white/80">Action Required</p>
+              <h2 className="mt-2 text-2xl font-semibold">Explanation requested</h2>
+              <p className="mt-2 text-white/85">{pendingUserRequest.text}</p>
+            </div>
+            <button className="h-11 rounded-lg bg-white px-4 text-sm font-semibold text-red-600" onClick={() => setView('workRecords')}>
+              Provide Explanation
+            </button>
+          </div>
+        </section>
+      )}
+
+      {unreadExplanationCount > 0 && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-6 shadow-soft">
+          <div className="flex items-center gap-4">
+            <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-amber-700">
+              <Bell size={22} />
+            </span>
+            <div>
+              <h2 className="text-2xl font-semibold">Unread explanations</h2>
+              <p className="mt-2 text-zinc-600">There are unread explanations. Check HR.</p>
             </div>
           </div>
         </section>
@@ -710,16 +760,46 @@ function LevelUp({ member, levels, rewards }: { member: WorkspaceMember; levels:
   );
 }
 
-function WorkRecordsPage({ member, records }: { member: WorkspaceMember; records: WorkRecord[] }) {
-  const sortedRecords = [...records].sort((a, b) => b.date.localeCompare(a.date));
+function CareerGrowth({ member }: { member: WorkspaceMember }) {
+  return (
+    <div className="grid gap-6">
+      <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
+        <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Career Growth</p>
+        <h1 className="mt-3 text-3xl font-semibold md:text-5xl">Career Growth</h1>
+      </section>
+      <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
+        <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Your Seniority</p>
+        <h2 className="mt-3 text-3xl font-semibold">{member.seniority || 'Not set yet'}</h2>
+        <p className="mt-4 max-w-2xl leading-7 text-zinc-600">We are working on integrating career growth into Workspace.</p>
+      </section>
+    </div>
+  );
+}
+
+function WorkRecordsPage({ member, records, setWorkRecords }: { member: WorkspaceMember; records: WorkRecord[]; setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>> }) {
+  const sortedRecords = sortRecordsNewestFirst(records);
   const healthIcon = member.strikeSystem === 0 ? '👍' : member.strikeSystem === 1 ? '🫤' : '☹️';
+
+  function submitExplanation(recordId: string, explanationText: string) {
+    setWorkRecords((items) =>
+      items.map((record) =>
+        record.id === recordId
+          ? {
+              ...record,
+              explanationText,
+              explanationSubmittedAt: new Date().toISOString(),
+            }
+          : record,
+      ),
+    );
+  }
 
   return (
     <div className="grid gap-6">
       <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Здоровье аккаунта</p>
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Account Health</p>
             <h1 className="mt-3 text-3xl font-semibold">{displayName(member)}</h1>
           </div>
           <div className="text-4xl">{healthIcon}</div>
@@ -736,6 +816,9 @@ function WorkRecordsPage({ member, records }: { member: WorkspaceMember; records
           {sortedRecords.length ? (
             sortedRecords.map((record) => {
               const style = recordStyle(record.type);
+              if (record.type === 'explanation_request') {
+                return <ExplanationRequestCard key={record.id} record={record} onSubmit={(text) => submitExplanation(record.id, text)} />;
+              }
               return (
                 <article key={record.id} className={`relative rounded-xl border ${style.border} ${style.bg} p-4 shadow-soft`}>
                   <span className="absolute -left-[31px] top-5 flex h-7 w-7 items-center justify-center rounded-full border border-line bg-white text-sm">{style.icon}</span>
@@ -750,6 +833,37 @@ function WorkRecordsPage({ member, records }: { member: WorkspaceMember; records
         </div>
       </Section>
     </div>
+  );
+}
+
+function ExplanationRequestCard({ record, onSubmit }: { record: WorkRecord; onSubmit: (text: string) => void }) {
+  const [text, setText] = useState(record.explanationText ?? '');
+  const hasSubmitted = Boolean(record.explanationText);
+
+  return (
+    <article className="relative rounded-xl border border-red-600 bg-red-600 p-4 text-white shadow-soft">
+      <span className="absolute -left-[31px] top-5 flex h-7 w-7 items-center justify-center rounded-full border border-red-600 bg-white text-sm text-red-600">!</span>
+      <p className="text-sm font-semibold uppercase tracking-[0.14em] text-white/80">Explanation Required</p>
+      <p className="mt-2 leading-7 text-white">{record.text}</p>
+      {hasSubmitted ? (
+        <div className="mt-4 rounded-lg bg-white/10 p-3">
+          <p className="text-sm font-semibold">Explanation submitted</p>
+          <p className="mt-2 text-sm text-white/85">{record.explanationText}</p>
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3">
+          <textarea
+            className="min-h-28 rounded-lg border border-white/30 bg-white p-3 text-sm text-ink outline-none"
+            placeholder="Attach explanation"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+          />
+          <button className="justify-self-start rounded-lg bg-white px-4 py-2 text-sm font-semibold text-red-600" onClick={() => text.trim() && onSubmit(text.trim())}>
+            Submit Explanation
+          </button>
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -1094,7 +1208,7 @@ function AdminRecordsTab({ member, records, setWorkRecords }: { member: Workspac
         id: `record-${Date.now()}`,
         memberId: member.id,
         type,
-        date,
+        date: type === 'explanation_request' ? '' : date,
         text,
         expiresAt: type === 'strike' ? addMonths(date, 6) : undefined,
       },
@@ -1108,8 +1222,8 @@ function AdminRecordsTab({ member, records, setWorkRecords }: { member: Workspac
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <Section title="Create Record">
         <div className="grid gap-4 md:grid-cols-[180px_180px_1fr_auto] md:items-end">
-          <SelectField<WorkRecordType> label="Type" value={type} options={['standard', 'positive', 'strike', 'negative']} onChange={setType} />
-          <Field label="Date" type="date" value={date} onChange={setDate} />
+          <SelectField<WorkRecordType> label="Type" value={type} options={['standard', 'positive', 'strike', 'negative', 'explanation_request']} onChange={setType} />
+          {type !== 'explanation_request' && <Field label="Date" type="date" value={date} onChange={setDate} />}
           <Field label="Record text" value={text} onChange={setText} />
           <button className="h-11 rounded-lg bg-forest px-4 text-sm font-medium text-white" onClick={addRecord}>Add</button>
         </div>
@@ -1117,8 +1231,43 @@ function AdminRecordsTab({ member, records, setWorkRecords }: { member: Workspac
       </Section>
       <Section title="Records">
         <div className="grid gap-3">
-          {[...records].sort((a, b) => b.date.localeCompare(a.date)).map((record) => {
+          {sortRecordsNewestFirst(records).map((record) => {
             const style = recordStyle(record.type);
+            if (record.type === 'explanation_request') {
+              return (
+                <div key={record.id} className="rounded-xl border border-red-600 bg-red-600 p-4 text-white">
+                  <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                    <div>
+                      <p className="text-sm font-semibold uppercase tracking-[0.14em] text-white/80">Request explanation</p>
+                      <p className="mt-2 text-white">{record.text}</p>
+                      {record.explanationText ? (
+                        <div className="mt-4 rounded-lg bg-white/10 p-3">
+                          <p className="text-sm font-semibold">Submitted explanation</p>
+                          <p className="mt-2 text-sm text-white/85">{record.explanationText}</p>
+                        </div>
+                      ) : (
+                        <p className="mt-4 text-sm text-white/75">Waiting for user response.</p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      {record.explanationText && (
+                        <>
+                          <button className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-red-600" onClick={() => setWorkRecords((items) => items.filter((item) => item.id !== record.id))}>
+                            Accept
+                          </button>
+                          <button className="rounded-lg bg-white/15 px-3 py-2 text-sm font-semibold text-white" onClick={() => setWorkRecords((items) => items.map((item) => (item.id === record.id ? { ...item, type: 'standard', date: today(), text: `${item.text} Explanation rejected: ${item.explanationText ?? ''}` } : item)))}>
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      <button className="rounded-lg bg-white/15 px-3 py-2 text-sm font-semibold text-white" onClick={() => setWorkRecords((items) => items.filter((item) => item.id !== record.id))}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div key={record.id} className={`rounded-xl border ${style.border} ${style.bg} p-4`}>
                 <div className="flex items-start justify-between gap-3">
