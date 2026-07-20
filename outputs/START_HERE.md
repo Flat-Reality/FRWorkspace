@@ -28,7 +28,11 @@ FR-ADMIN
 
 - темно-фиолетовый акцент вместо зеленого;
 - мобильная версия;
-- страница Rewards в боковом меню;
+- страница LevelUp! в боковом меню;
+- Work Records с account health и таймлайном;
+- Signed Documents открывает подписанные документы по ссылкам;
+- пустые страницы Benefits и Installs подготовлены;
+- Admin перестроен на модули HR, Guide Writting и LevelUp! Configurator;
 - Supabase-сохранение через таблицу `workspace_state`;
 - GitHub Pages custom domain файл `public/CNAME`;
 - домен: `workspace.flatreality.eu`.

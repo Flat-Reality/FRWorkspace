@@ -37,6 +37,12 @@ create table public.workspace_state (
   updated_at timestamptz not null default now()
 );
 
+-- Current MVP storage note:
+-- The live app stores members, LevelUp data, guide pages, work records,
+-- documents, issued rewards, onboarding flags, and payment settings in
+-- the workspace_state.state JSON document. This avoids disruptive table
+-- migrations while the product is still changing quickly.
+
 create table public.levelup_levels (
   id uuid primary key default gen_random_uuid(),
   level_number integer not null,

@@ -29,8 +29,11 @@ FR-ADMIN
 - Employment ID login.
 - Dashboard with LevelUp! XP, rewards, and Jump To links.
 - Dedicated Rewards page.
+- Work Records with account health, timeline entries, strikes, and automatic strike expiry logic.
+- Signed Documents, Benefits, and Installs pages.
 - Read-only user profile with limited self-editable fields.
-- Admin user creation and editing.
+- Modular Admin area: HR, Guide Writting, and LevelUp! Configurator.
+- HR profile tabs for Profile, Work Records, LevelUp!, Payments, and Documents.
 - Admin status controls.
 - Admin LevelUp! level and reward configuration.
 - Admin-created guide pages with simple text markup.
