@@ -368,6 +368,11 @@ export default function App() {
     setWorkRecords(reconciled.records);
   }
 
+  function updateWorkRecords(nextRecords: SetStateAction<WorkRecord[]>) {
+    const records = typeof nextRecords === 'function' ? nextRecords(workRecords) : nextRecords;
+    updateMembers(members, records);
+  }
+
   function login() {
     const rawMember = members.find((item) => item.employmentId.toLowerCase() === employmentId.trim().toLowerCase());
     const member = rawMember ? normalizeMemberRuntime(rawMember) : null;
@@ -484,7 +489,7 @@ export default function App() {
           {view === 'profile' && <Profile member={currentMember} updateCurrentMember={updateCurrentMember} />}
           {view === 'levelup' && <LevelUp member={currentMember} levels={levels} rewards={rewards} />}
           {view === 'careerGrowth' && <CareerGrowth member={currentMember} />}
-          {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} setWorkRecords={setWorkRecords} />}
+          {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} setWorkRecords={updateWorkRecords} />}
           {view === 'signedDocuments' && <SignedDocuments member={currentMember} />}
           {view === 'benefits' && <Placeholder title="Benefits" text="We are working on integrating this feature into Workspace!" />}
           {view === 'installs' && <Placeholder title="Installs" text="Install access will be added here later." />}
@@ -500,10 +505,7 @@ export default function App() {
               setLevels={setLevels}
               setRewards={setRewards}
               setGuidePages={setGuidePages}
-              setWorkRecords={(nextRecords) => {
-                const records = typeof nextRecords === 'function' ? nextRecords(workRecords) : nextRecords;
-                updateMembers(members, records);
-              }}
+              setWorkRecords={updateWorkRecords}
             />
           )}
         </div>
