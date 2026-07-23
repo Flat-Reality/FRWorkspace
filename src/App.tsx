@@ -1372,10 +1372,21 @@ function AdminPaymentsTab({ member, updateMember }: { member: WorkspaceMember; u
 }
 
 function AdminDocumentsTab({ member, updateMember }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
-  function setDoc(title: string, signed: boolean, url: string, category: 'onboarding' | 'other' = 'onboarding') {
-    const existing = member.documents.find((doc) => doc.title === title);
+  function upsertDocument(documents: MemberDocument[], title: string, signed: boolean, url: string, category: 'onboarding' | 'other' = 'onboarding') {
+    const existing = documents.find((doc) => doc.title === title);
     const nextDoc: MemberDocument = existing ? { ...existing, signed, url, category } : { id: `doc-${Date.now()}-${title}`, title, signed, url, category };
-    updateMember({ documents: existing ? member.documents.map((doc) => (doc.id === existing.id ? nextDoc : doc)) : [...member.documents, nextDoc] });
+    return existing ? documents.map((doc) => (doc.id === existing.id ? nextDoc : doc)) : [...documents, nextDoc];
+  }
+
+  function updateOnboardingDocument(type: 'nda' | 'gdpr', checked: boolean, url: string) {
+    const title = type === 'nda' ? 'NDA' : 'GDPR';
+    updateMember({
+      onboarding: {
+        ...member.onboarding,
+        ...(type === 'nda' ? { ndaSigned: checked, ndaUrl: url } : { gdprSigned: checked, gdprUrl: url }),
+      },
+      documents: upsertDocument(member.documents, title, checked, url),
+    });
   }
 
   function completeOnboarding(checked: boolean) {
@@ -1397,14 +1408,8 @@ function AdminDocumentsTab({ member, updateMember }: { member: WorkspaceMember; 
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <Section title="Onboarding">
         <div className="grid gap-4">
-          <DocumentCheck title="NDA Signed" checked={member.onboarding.ndaSigned} url={member.onboarding.ndaUrl || nda?.url || ''} onChange={(checked, url) => {
-            updateMember({ onboarding: { ...member.onboarding, ndaSigned: checked, ndaUrl: url } });
-            setDoc('NDA', checked, url);
-          }} />
-          <DocumentCheck title="GDPR Signed" checked={member.onboarding.gdprSigned} url={member.onboarding.gdprUrl || gdpr?.url || ''} onChange={(checked, url) => {
-            updateMember({ onboarding: { ...member.onboarding, gdprSigned: checked, gdprUrl: url } });
-            setDoc('GDPR', checked, url);
-          }} />
+          <DocumentCheck title="NDA Signed" checked={member.onboarding.ndaSigned} url={member.onboarding.ndaUrl || nda?.url || ''} onChange={(checked, url) => updateOnboardingDocument('nda', checked, url)} />
+          <DocumentCheck title="GDPR Signed" checked={member.onboarding.gdprSigned} url={member.onboarding.gdprUrl || gdpr?.url || ''} onChange={(checked, url) => updateOnboardingDocument('gdpr', checked, url)} />
           <label className="flex h-11 items-center gap-3 rounded-lg border border-line px-3 text-sm font-medium text-zinc-600">
             <input type="checkbox" checked={member.onboarding.completed} onChange={(event) => completeOnboarding(event.target.checked)} />
             Onboarding Completed (+100 XP once)
