@@ -57,6 +57,7 @@ import type {
 type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth';
 type AdminModule = 'home' | 'hr' | 'guides' | 'levelup';
 type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents';
+type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
 
 const iconMap: Record<string, LucideIcon> = {
   HeartHandshake,
@@ -506,6 +507,7 @@ export default function App() {
               setRewards={setRewards}
               setGuidePages={setGuidePages}
               setWorkRecords={updateWorkRecords}
+              updateWorkspace={updateMembers}
             />
           )}
         </div>
@@ -939,6 +941,7 @@ function Admin({
   setRewards,
   setGuidePages,
   setWorkRecords,
+  updateWorkspace,
 }: {
   members: WorkspaceMember[];
   levels: Level[];
@@ -950,10 +953,11 @@ function Admin({
   setRewards: Dispatch<SetStateAction<Reward[]>>;
   setGuidePages: Dispatch<SetStateAction<GuidePage[]>>;
   setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>>;
+  updateWorkspace: WorkspaceUpdate;
 }) {
   const [module, setModule] = useState<AdminModule>('home');
 
-  if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} onBack={() => setModule('home')} />;
+  if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} onBack={() => setModule('home')} />;
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
 
@@ -1001,6 +1005,7 @@ function HrAdmin({
   workRecords,
   setMembers,
   setWorkRecords,
+  updateWorkspace,
   onBack,
 }: {
   members: WorkspaceMember[];
@@ -1009,13 +1014,17 @@ function HrAdmin({
   workRecords: WorkRecord[];
   setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>;
   setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>>;
+  updateWorkspace: WorkspaceUpdate;
   onBack: () => void;
 }) {
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [tab, setTab] = useState<HrTab>('profile');
   const [search, setSearch] = useState('');
+  const [showSuspendedUsers, setShowSuspendedUsers] = useState(false);
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? null;
   const filteredMembers = members.filter((member) => [member.fullName, member.preferredName, member.employmentId, member.jobRole].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const visibleMembers = filteredMembers.filter((member) => member.status !== 'suspended');
+  const suspendedMembers = filteredMembers.filter((member) => member.status === 'suspended');
 
   function createUser() {
     const member: WorkspaceMember = {
@@ -1024,8 +1033,7 @@ function HrAdmin({
       employmentId: `FR-${members.length + 1001}`,
       workStartDate: today(),
     };
-    setMembers((items) => [...items, member]);
-    setWorkRecords((items) => [...items, registrationRecord(member)]);
+    updateWorkspace([...members, member], [...workRecords, registrationRecord(member)]);
     setSelectedMemberId(member.id);
     setTab('profile');
   }
@@ -1056,8 +1064,14 @@ function HrAdmin({
               <input className="w-full outline-none" placeholder="Search users" value={search} onChange={(event) => setSearch(event.target.value)} />
             </label>
           </section>
-          <PeopleGroup title="Core Team" members={filteredMembers.filter((member) => member.contractType === 'CORE TEAM')} onSelect={setSelectedMemberId} />
-          <PeopleGroup title="Independent Contractors" members={filteredMembers.filter((member) => member.contractType === 'INDEPENDENT PARTNER')} onSelect={setSelectedMemberId} />
+          <PeopleGroup title="Core Team" members={visibleMembers.filter((member) => member.contractType === 'CORE TEAM')} onSelect={setSelectedMemberId} />
+          <PeopleGroup title="Independent Contractors" members={visibleMembers.filter((member) => member.contractType === 'INDEPENDENT PARTNER')} onSelect={setSelectedMemberId} />
+          <section className="grid gap-3">
+            <button className="justify-self-start text-sm font-medium text-forest" onClick={() => setShowSuspendedUsers((value) => !value)}>
+              {showSuspendedUsers ? 'Hide suspended users' : 'Show suspended users'}
+            </button>
+            {showSuspendedUsers && <PeopleGroup title="Suspended Users" members={suspendedMembers} onSelect={setSelectedMemberId} />}
+          </section>
         </>
       ) : (
         <MemberEditor
