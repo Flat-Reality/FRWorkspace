@@ -57,10 +57,10 @@ export const initialRewards: Reward[] = [
 export const initialJumpLinks: JumpLink[] = [
   { id: 'jump-1', title: 'Social Benefits', icon: 'HeartHandshake', url: 'https://tally.so/r/EkYpQq', order: 1 },
   { id: 'jump-2', title: 'Code of Conduct', icon: 'ShieldCheck', url: '#code-of-conduct', order: 2 },
-  { id: 'jump-3', title: 'Signed Documents', icon: 'FileCheck2', url: '#signed-documents', order: 3, internalView: 'signedDocuments' },
-  { id: 'jump-4', title: 'Work Records', icon: 'ClipboardList', url: '#work-records', order: 4, internalView: 'workRecords' },
-  { id: 'jump-5', title: 'Update Profile', icon: 'UserRound', url: '#profile', order: 5, internalView: 'profile' },
-  { id: 'jump-6', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 6 },
+  { id: 'jump-4', title: 'Work Records', icon: 'ClipboardList', url: '#work-records', order: 3, internalView: 'workRecords' },
+  { id: 'jump-5', title: 'Update Profile', icon: 'UserRound', url: '#profile', order: 4, internalView: 'profile' },
+  { id: 'jump-6', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 5 },
+  { id: 'jump-7', title: 'Career Growth', icon: 'TrendingUp', url: '#career-growth', order: 6, internalView: 'careerGrowth' },
 ];
 
 export const initialGuidePages: GuidePage[] = [

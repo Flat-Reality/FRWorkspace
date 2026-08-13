@@ -31,6 +31,7 @@ import {
   Trash2,
   Trophy,
   TrendingUp,
+  Umbrella,
   UserRound,
   UsersRound,
   WalletCards,
@@ -117,6 +118,10 @@ function getNextLevel(levels: Level[], xp: number) {
 
 function statusLabel(status: MemberStatus) {
   return statusOptions.find((option) => option.value === status)?.label ?? status;
+}
+
+function formatEuroAmount(amount: number | undefined) {
+  return `${Number(amount ?? 0).toFixed(2)}€`;
 }
 
 function recordStyle(type: WorkRecordType) {
@@ -351,17 +356,23 @@ export default function App() {
   const nextXp = nextLevel?.xpRequired ?? Math.max(currentMember?.xp ?? 1, 1);
   const progress = currentMember ? Math.min(100, Math.round(((currentMember.xp - previousXp) / Math.max(nextXp - previousXp, 1)) * 100)) : 0;
 
-  const navItems: Array<[View, LucideIcon, string]> = [
-    ['dashboard', LayoutDashboard, 'Dashboard'],
-    ['profile', UserRound, 'Profile'],
-    ['levelup', Trophy, 'LevelUp!'],
-    ['careerGrowth', TrendingUp, 'Career Growth'],
-    ['guides', BookOpen, 'Guides'],
-    ['benefits', HeartHandshake, 'Benefits'],
-    ['installs', Download, 'Installs'],
-  ];
+  const navItems: Array<[View, LucideIcon, string]> =
+    currentMember?.status === 'suspended'
+      ? [
+          ['dashboard', LayoutDashboard, 'Dashboard'],
+          ['profile', UserRound, 'Update Profile'],
+        ]
+      : [
+          ['dashboard', LayoutDashboard, 'Dashboard'],
+          ['profile', UserRound, 'Profile'],
+          ['levelup', Trophy, 'LevelUp!'],
+          ['signedDocuments', FileCheck2, 'Signed Documents'],
+          ['guides', BookOpen, 'Guides'],
+          ['benefits', HeartHandshake, 'Benefits'],
+          ['installs', Download, 'Installs'],
+        ];
 
-  if (currentMember?.isAdmin) navItems.push(['admin', UsersRound, 'Admin']);
+  if (currentMember?.isAdmin && currentMember.status !== 'suspended') navItems.push(['admin', UsersRound, 'Admin']);
 
   function updateMembers(nextMembers: WorkspaceMember[], nextRecords = workRecords) {
     const reconciled = reconcileWorkspace(nextMembers, nextRecords);
@@ -383,10 +394,6 @@ export default function App() {
     }
     if (rawMember && rawMember.status !== member.status) {
       updateMembers(members.map((item) => (item.id === member.id ? member : item)));
-    }
-    if (member.status === 'suspended') {
-      setLoginError('This workspace account is suspended.');
-      return;
     }
     setCurrentMemberId(member.id);
     setView('dashboard');
@@ -464,7 +471,7 @@ export default function App() {
 
           <div className="mt-6 rounded-lg border border-line bg-mist p-3">
             <p className="text-sm font-medium">{displayName(currentMember)}</p>
-            <p className="mt-1 text-xs text-zinc-500">{currentMember.employmentId} · €{Number(currentMember.withheldBalance ?? 0).toFixed(2)}</p>
+            <p className="mt-1 text-xs text-zinc-500">{currentMember.employmentId} · {formatEuroAmount(currentMember.withheldBalance)}</p>
             <p className="mt-3 text-xs text-zinc-500">{saveStatus}</p>
           </div>
 
@@ -537,6 +544,33 @@ function Dashboard({
 }) {
   const pendingUserRequest = workRecords.find((record) => record.memberId === member.id && record.type === 'explanation_request' && !record.explanationText);
   const unreadExplanationCount = member.isAdmin ? workRecords.filter((record) => record.type === 'explanation_request' && record.explanationText).length : 0;
+  const isSuspended = member.status === 'suspended';
+  const suspendedJumpLinks: JumpLink[] = [
+    { id: 'suspended-signed-documents', title: 'Signed Documents', icon: 'FileCheck2', url: '#signed-documents', order: 1, internalView: 'signedDocuments' },
+    { ...(jumpLinks.find((link) => link.title === 'Contact Head Office') ?? { id: 'jump-contact-head-office', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 2 }), order: 2 },
+    { ...(jumpLinks.find((link) => link.internalView === 'workRecords') ?? { id: 'jump-work-records', title: 'Work Records', icon: 'ClipboardList', url: '#work-records', order: 3, internalView: 'workRecords' }), order: 3 },
+  ];
+  const visibleJumpLinks = isSuspended ? suspendedJumpLinks : jumpLinks;
+  const inactiveStatus = member.status !== 'active' && member.status !== 'suspended'
+    ? {
+        sick_leave: {
+          title: 'Get well soon!',
+          body: `Your sick leave is scheduled until ${formatDate(member.statusUntil)}.`,
+          icon: HeartPulse,
+        },
+        mental_health_days: {
+          title: 'Focus on yourself!',
+          body: `Your mental health days are scheduled until ${formatDate(member.statusUntil)}.`,
+          icon: Brain,
+        },
+        paused: {
+          title: 'Rest up!',
+          body: `Your pause is scheduled until ${formatDate(member.statusUntil)}.`,
+          icon: Umbrella,
+        },
+      }[member.status]
+    : null;
+  const InactiveStatusIcon = inactiveStatus?.icon;
 
   return (
     <>
@@ -545,7 +579,42 @@ function Dashboard({
         <h1 className="mt-3 text-3xl font-semibold md:text-5xl">Welcome back, {displayName(member)}</h1>
       </section>
 
-      {!member.onboarding.completed && (
+      {isSuspended && (
+        <section className="rounded-xl border border-red-700 bg-red-600 p-6 text-white shadow-soft">
+          <div className="grid gap-5 md:grid-cols-[1fr_auto] md:items-center">
+            <div className="flex items-start gap-4">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/15">
+                <Ban size={24} />
+              </span>
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.14em] text-white/80">Limited Access</p>
+                <h2 className="mt-2 text-2xl font-semibold">Your account has been suspended</h2>
+                <p className="mt-2 max-w-2xl text-white/85">You can still use limited Workspace features. All withheld funds will be transferred using the Supplier Form payout details available in your profile.</p>
+              </div>
+            </div>
+            <div className="rounded-xl bg-white px-5 py-4 text-right text-red-700">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-red-500">Withheld Balance</p>
+              <p className="mt-1 text-3xl font-semibold">{formatEuroAmount(member.withheldBalance)}</p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {InactiveStatusIcon && inactiveStatus && (
+        <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
+          <div className="flex items-start gap-4">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-forest/10 text-forest">
+              <InactiveStatusIcon size={24} />
+            </span>
+            <div>
+              <h2 className="text-2xl font-semibold">{inactiveStatus.title}</h2>
+              <p className="mt-2 text-zinc-600">{inactiveStatus.body}</p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {!isSuspended && !member.onboarding.completed && (
         <section className="rounded-xl border border-forest bg-forest/5 p-6 shadow-soft">
           <div className="flex items-start gap-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white text-2xl shadow-soft">👋</div>
@@ -557,7 +626,7 @@ function Dashboard({
         </section>
       )}
 
-      {pendingUserRequest && (
+      {!isSuspended && pendingUserRequest && (
         <section className="rounded-xl border border-red-600 bg-red-600 p-6 text-white shadow-soft">
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
@@ -572,7 +641,7 @@ function Dashboard({
         </section>
       )}
 
-      {unreadExplanationCount > 0 && (
+      {!isSuspended && unreadExplanationCount > 0 && (
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-6 shadow-soft">
           <div className="flex items-center gap-4">
             <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-amber-700">
@@ -586,7 +655,7 @@ function Dashboard({
         </section>
       )}
 
-      <section className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+      {!isSuspended && <section className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
         <div className="rounded-xl border border-line bg-paper p-6 shadow-soft">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -616,11 +685,11 @@ function Dashboard({
             {nextRewards.length > 0 ? nextRewards.map((reward) => <p key={reward.id}>{reward.rewardName}</p>) : <p>No rewards configured for the next level.</p>}
           </div>
         </div>
-      </section>
+      </section>}
 
       <Section title="Jump To">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {[...jumpLinks].sort((a, b) => a.order - b.order).map((link) => {
+          {[...visibleJumpLinks].sort((a, b) => a.order - b.order).map((link) => {
             const Icon = iconMap[link.icon] ?? BookOpen;
             const content = (
               <>
