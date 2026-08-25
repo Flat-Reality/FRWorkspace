@@ -203,6 +203,17 @@ function parseEstimatedHours(value: string) {
   return match ? Number(match[0]) : 0;
 }
 
+function formatTime12(time: string) {
+  const [rawHours, rawMinutes] = time.split(':').map(Number);
+  const period = rawHours >= 12 ? 'PM' : 'AM';
+  const hours = rawHours % 12 || 12;
+  return `${String(hours).padStart(2, '0')}:${String(rawMinutes || 0).padStart(2, '0')} ${period}`;
+}
+
+function shiftTimeLabel(shift: ScheduleShift) {
+  return `${formatTime12(shift.startTime)} - ${formatTime12(shift.endTime)}`;
+}
+
 function recordStyle(type: WorkRecordType) {
   if (type === 'explanation_request') return { icon: '!', border: 'border-red-600', bg: 'bg-red-600' };
   if (type === 'positive') return { icon: '🎉', border: 'border-emerald-300', bg: 'bg-emerald-50' };
@@ -390,6 +401,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
   const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
+  const [loginIntroName, setLoginIntroName] = useState('');
   const [view, setView] = useState<View>('dashboard');
   const [loginError, setLoginError] = useState('');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -497,6 +509,8 @@ export default function App() {
     }
     setCurrentMemberId(member.id);
     saveSession(member.id);
+    setLoginIntroName(displayName(member));
+    window.setTimeout(() => setLoginIntroName(''), 1150);
     setView('dashboard');
     setLoginError('');
     setPassword('');
@@ -517,7 +531,7 @@ export default function App() {
     return (
       <main className="min-h-screen bg-mist px-5 py-8 text-ink">
         <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl content-center gap-8">
-          <div className="grid gap-5">
+          <div className="login-brand grid gap-5">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-ink text-white">
               <img className="h-7 w-7" src={BRAND_ICON} alt="" />
             </div>
@@ -528,7 +542,7 @@ export default function App() {
           </div>
 
           <form
-            className="grid gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft md:max-w-md"
+            className="login-card grid gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft md:max-w-md"
             autoComplete="on"
             onSubmit={(event) => {
               event.preventDefault();
@@ -579,8 +593,13 @@ export default function App() {
 
   return (
     <main className="min-h-screen bg-mist text-ink">
+      {loginIntroName && (
+        <div className="login-intro fixed inset-0 z-[60] grid place-items-center bg-mist">
+          <h1 className="px-6 text-center text-4xl font-semibold text-ink md:text-6xl">Welcome back, {loginIntroName}</h1>
+        </div>
+      )}
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-4 lg:grid-cols-[250px_1fr] lg:px-6">
-        <aside className="rounded-xl border border-line bg-paper p-4 shadow-soft lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)]">
+        <aside className="workspace-sidebar rounded-xl border border-line bg-paper p-4 shadow-soft lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)]">
           <div className="flex items-center gap-3 border-b border-line pb-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-white">
               <img className="h-6 w-6" src={BRAND_ICON} alt="" />
@@ -618,7 +637,7 @@ export default function App() {
           </button>
         </aside>
 
-        <div className="grid gap-6">
+        <div className="workspace-content grid gap-6">
           {view === 'dashboard' && (
             <Dashboard
               member={currentMember}
@@ -1218,8 +1237,8 @@ function Schedule({
                         style={{ top, height }}
                         onClick={() => setEditingShift(shift)}
                       >
-                        <span className="block text-sm font-semibold">Workspace Shift</span>
-                        <span className="mt-1 block text-xs">{shift.startTime}-{shift.endTime}</span>
+                        <span className="block text-sm font-semibold">{shiftTimeLabel(shift)}</span>
+                        <span className="mt-1 block text-xs">{formatHours(minutesToHours(timeToMinutes(shift.endTime) - timeToMinutes(shift.startTime)))}</span>
                       </button>
                     );
                   })}
@@ -1373,7 +1392,15 @@ function ShiftEditor({
 }
 
 function CompleteShiftSheet({ dayName, planned, completion, onClose, onSave }: { dayName: string; planned: number; completion?: ScheduleDayCompletion; onClose: () => void; onSave: (actualHours: number) => void }) {
-  const [actualHours, setActualHours] = useState(String(completion?.actualHours ?? Math.floor(planned)));
+  const initialHours = completion?.actualHours ?? Math.floor(planned);
+  const [actualHours, setActualHours] = useState(String(Math.floor(initialHours)));
+  const [actualMinutes, setActualMinutes] = useState(String(Math.round((initialHours - Math.floor(initialHours)) * 60)));
+
+  function saveActualTime() {
+    const hours = Math.max(0, Number(actualHours) || 0);
+    const minutes = Math.min(59, Math.max(0, Number(actualMinutes) || 0));
+    onSave(hours + minutes / 60);
+  }
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-end bg-ink/35 p-3 sm:place-items-center">
@@ -1387,8 +1414,11 @@ function CompleteShiftSheet({ dayName, planned, completion, onClose, onSave }: {
           <button className="text-sm font-medium text-zinc-500" onClick={onClose}>Close</button>
         </div>
         <div className="mt-5 grid gap-4">
-          <Field label="Actual Hours" type="number" value={actualHours} onChange={setActualHours} />
-          <button className="h-11 rounded-lg bg-forest px-4 text-sm font-medium text-white" onClick={() => onSave(Math.max(0, Number(actualHours) || 0))}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Actual Hours" type="number" value={actualHours} onChange={setActualHours} />
+            <Field label="Actual Minutes" type="number" value={actualMinutes} onChange={setActualMinutes} />
+          </div>
+          <button className="h-11 rounded-lg bg-forest px-4 text-sm font-medium text-white" onClick={saveActualTime}>
             Save Actual Time
           </button>
         </div>
@@ -1521,8 +1551,8 @@ function NextWeekPlanningCard({
                             setEditingShift(shift);
                           }}
                         >
-                          <span className="block text-sm font-semibold">Workspace Shift</span>
-                          <span className="mt-1 block text-xs">{shift.startTime}-{shift.endTime}</span>
+                          <span className="block text-sm font-semibold">{shiftTimeLabel(shift)}</span>
+                          <span className="mt-1 block text-xs">{formatHours(minutesToHours(timeToMinutes(shift.endTime) - timeToMinutes(shift.startTime)))}</span>
                         </button>
                       );
                     })}
