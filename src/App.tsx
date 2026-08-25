@@ -198,6 +198,15 @@ function formatHours(hours: number) {
   return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`;
 }
 
+function formatPlannerTime(hours: number) {
+  const totalMinutes = Math.round(hours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!wholeHours && minutes) return `${minutes} min`;
+  if (wholeHours && minutes) return `${wholeHours}h ${minutes}m`;
+  return `${wholeHours}h`;
+}
+
 function parseEstimatedHours(value: string) {
   const match = value.match(/\d+(\.\d+)?/);
   return match ? Number(match[0]) : 0;
@@ -1200,7 +1209,7 @@ function Schedule({
                     </div>
                     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${completion ? `${statusClass} text-white` : 'bg-mist text-zinc-700'}`}>
                       <span className={`h-2 w-2 rounded-full ${completion ? 'bg-white' : 'bg-ink'}`} />
-                      {formatHours(Math.floor(completion?.actualHours ?? planned))}
+                      {formatPlannerTime(completion?.actualHours ?? planned)}
                     </span>
                   </div>
                   <button className="mt-3 h-9 w-full rounded-lg bg-forest px-2 text-sm font-medium text-white" onClick={() => { setIsPlanningNextWeek(false); setCreatingDayIndex(dayIndex); }}>
@@ -1519,7 +1528,7 @@ function NextWeekPlanningCard({
                         <p className="font-semibold">{day}</p>
                         <p className="text-xs text-zinc-500">{formatDate(addDays(nextWeekStart, dayIndex))}</p>
                       </div>
-                      <span className="rounded-full bg-mist px-2 py-1 text-xs font-semibold text-zinc-700">{formatHours(plannedHours(dayShifts(dayIndex)))}</span>
+                      <span className="rounded-full bg-mist px-2 py-1 text-xs font-semibold text-zinc-700">{formatPlannerTime(plannedHours(dayShifts(dayIndex)))}</span>
                     </div>
                     <button className="mt-3 h-9 w-full rounded-lg bg-forest px-2 text-sm font-medium text-white" onClick={() => { setIsPlanning(true); setCreatingDayIndex(dayIndex); }}>
                       + Create Shift

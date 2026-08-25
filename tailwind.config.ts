@@ -5,17 +5,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: '#18181b',
-        mist: '#f4f4f5',
-        paper: '#ffffff',
-        line: '#e4e4e7',
+        ink: 'rgb(var(--color-ink) / <alpha-value>)',
+        mist: 'rgb(var(--color-mist) / <alpha-value>)',
+        paper: 'rgb(var(--color-paper) / <alpha-value>)',
+        line: 'rgb(var(--color-line) / <alpha-value>)',
         forest: '#7F00FF',
         coral: '#d76d55',
         sky: '#4d7caa',
         amber: '#b9822f',
       },
       boxShadow: {
-        soft: '0 18px 45px rgba(24, 24, 27, 0.08)',
+        soft: 'var(--shadow-soft)',
       },
     },
   },
