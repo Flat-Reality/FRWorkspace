@@ -40,6 +40,8 @@ export const emptyMember: WorkspaceMember = {
   status: 'active',
   statusUntil: '',
   isAdmin: false,
+  passwordHash: '',
+  scheduleEnabled: false,
 };
 
 export const initialLevels: Level[] = [

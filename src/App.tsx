@@ -9,20 +9,24 @@ import {
   Brain,
   Building2,
   CalendarClock,
+  CalendarDays,
   Check,
   CheckCircle2,
   ClipboardList,
   Download,
+  ExternalLink,
   FileCheck2,
   FileText,
   Gift,
   Gavel,
   HeartHandshake,
   HeartPulse,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   PenLine,
   Plus,
+  RotateCcw,
   Save,
   Search,
   Settings2,
@@ -49,16 +53,23 @@ import type {
   MemberStatus,
   OnboardingContractType,
   Reward,
+  ScheduleDayCompletion,
+  ScheduleDayStatus,
+  ScheduleShift,
   WorkRecord,
   WorkRecordType,
   WorkspaceMember,
   WorkspaceState,
 } from './types';
 
-type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth';
-type AdminModule = 'home' | 'hr' | 'guides' | 'levelup';
-type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents';
+type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule';
+type AdminModule = 'home' | 'hr' | 'guides' | 'levelup' | 'supabase';
+type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents' | 'schedule';
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
+
+const SESSION_KEY = 'flat-reality-workspace-session';
+const SESSION_DURATION_MS = 90 * 24 * 60 * 60 * 1000;
+const BRAND_ICON = '/resources/favicon/favicon-32x32.png';
 
 const iconMap: Record<string, LucideIcon> = {
   HeartHandshake,
@@ -70,6 +81,7 @@ const iconMap: Record<string, LucideIcon> = {
   Building2,
   Trophy,
   TrendingUp,
+  CalendarDays,
 };
 
 const statusOptions: Array<{ value: MemberStatus; label: string; icon: LucideIcon; needsDate: boolean; blocksLogin: boolean }> = [
@@ -122,6 +134,73 @@ function statusLabel(status: MemberStatus) {
 
 function formatEuroAmount(amount: number | undefined) {
   return `${Number(amount ?? 0).toFixed(2)}€`;
+}
+
+async function hashPassword(password: string) {
+  const bytes = new TextEncoder().encode(password);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function getStoredSession() {
+  try {
+    const session = JSON.parse(window.localStorage.getItem(SESSION_KEY) ?? 'null') as { memberId?: string; expiresAt?: number } | null;
+    if (!session?.memberId || !session.expiresAt || session.expiresAt < Date.now()) {
+      window.localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return session;
+  } catch {
+    window.localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+}
+
+function saveSession(memberId: string) {
+  window.localStorage.setItem(SESSION_KEY, JSON.stringify({ memberId, expiresAt: Date.now() + SESSION_DURATION_MS }));
+}
+
+function clearSession() {
+  window.localStorage.removeItem(SESSION_KEY);
+}
+
+function getWeekStart(date = new Date()) {
+  const value = new Date(date);
+  const day = value.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  value.setDate(value.getDate() + diff);
+  value.setHours(0, 0, 0, 0);
+  return value.toISOString().slice(0, 10);
+}
+
+function addDays(date: string, days: number) {
+  const value = new Date(`${date}T12:00:00`);
+  value.setDate(value.getDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function timeToMinutes(time: string) {
+  const [hours, minutes] = time.split(':').map(Number);
+  return (hours || 0) * 60 + (minutes || 0);
+}
+
+function minutesToHours(minutes: number) {
+  return Math.max(0, minutes) / 60;
+}
+
+function plannedHours(shifts: ScheduleShift[]) {
+  return shifts.reduce((total, shift) => total + minutesToHours(timeToMinutes(shift.endTime) - timeToMinutes(shift.startTime)), 0);
+}
+
+function formatHours(hours: number) {
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`;
+}
+
+function parseEstimatedHours(value: string) {
+  const match = value.match(/\d+(\.\d+)?/);
+  return match ? Number(match[0]) : 0;
 }
 
 function recordStyle(type: WorkRecordType) {
@@ -303,9 +382,13 @@ export default function App() {
   const [levels, setLevels] = useState<Level[]>(initialLevels);
   const [rewards, setRewards] = useState<Reward[]>(initialRewards);
   const [workRecords, setWorkRecords] = useState<WorkRecord[]>([]);
+  const [scheduleShifts, setScheduleShifts] = useState<ScheduleShift[]>([]);
+  const [scheduleCompletions, setScheduleCompletions] = useState<ScheduleDayCompletion[]>([]);
   const [jumpLinks] = useState<JumpLink[]>(initialJumpLinks);
   const [guidePages, setGuidePages] = useState<GuidePage[]>(initialGuidePages);
   const [employmentId, setEmploymentId] = useState('');
+  const [password, setPassword] = useState('');
+  const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
   const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
   const [view, setView] = useState<View>('dashboard');
   const [loginError, setLoginError] = useState('');
@@ -324,6 +407,13 @@ export default function App() {
         setRewards(state.rewards);
         setGuidePages(state.guidePages);
         setWorkRecords(reconciled.records);
+        setScheduleShifts(state.scheduleShifts);
+        setScheduleCompletions(state.scheduleCompletions);
+        const session = getStoredSession();
+        const sessionMemberId = session?.memberId;
+        if (sessionMemberId && reconciled.members.some((member) => member.id === sessionMemberId)) {
+          setCurrentMemberId(sessionMemberId);
+        }
         setSaveStatus(isSupabaseConfigured ? 'Database connected' : 'Saved locally in this browser');
       })
       .catch(() => {
@@ -342,11 +432,11 @@ export default function App() {
   useEffect(() => {
     if (!isLoaded) return;
 
-    const state: WorkspaceState = { members, levels, rewards, guidePages, workRecords };
+    const state: WorkspaceState = { members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions };
     saveWorkspaceState(state)
       .then(() => setSaveStatus(isSupabaseConfigured ? 'Saved to database' : 'Saved locally in this browser'))
       .catch(() => setSaveStatus('Could not save to database. Local copy is still saved.'));
-  }, [members, levels, rewards, guidePages, workRecords, isLoaded]);
+  }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, isLoaded]);
 
   const currentMember = members.find((member) => member.id === currentMemberId) ?? null;
   const currentLevel = currentMember ? getCurrentLevel(levels, currentMember.xp) : levels[0];
@@ -367,6 +457,7 @@ export default function App() {
           ['profile', UserRound, 'Profile'],
           ['levelup', Trophy, 'LevelUp!'],
           ['signedDocuments', FileCheck2, 'Signed Documents'],
+          ...(currentMember?.scheduleEnabled ? ([['schedule', CalendarDays, 'Schedule β']] as Array<[View, LucideIcon, string]>) : []),
           ['guides', BookOpen, 'Guides'],
           ['benefits', HeartHandshake, 'Benefits'],
           ['installs', Download, 'Installs'],
@@ -385,24 +476,41 @@ export default function App() {
     updateMembers(members, records);
   }
 
-  function login() {
+  async function login() {
     const rawMember = members.find((item) => item.employmentId.toLowerCase() === employmentId.trim().toLowerCase());
     const member = rawMember ? normalizeMemberRuntime(rawMember) : null;
     if (!member) {
       setLoginError('Employment ID was not found.');
       return;
     }
+    if (!member.passwordHash) {
+      setLoginError('Password is not set. Use recovery options to create one.');
+      return;
+    }
+    const passwordHash = await hashPassword(password);
+    if (passwordHash !== member.passwordHash) {
+      setLoginError('Employment ID or password is incorrect.');
+      return;
+    }
     if (rawMember && rawMember.status !== member.status) {
       updateMembers(members.map((item) => (item.id === member.id ? member : item)));
     }
     setCurrentMemberId(member.id);
+    saveSession(member.id);
     setView('dashboard');
     setLoginError('');
+    setPassword('');
   }
 
   function updateCurrentMember(changes: Partial<WorkspaceMember>) {
     if (!currentMember) return;
     updateMembers(members.map((member) => (member.id === currentMember.id ? { ...member, ...changes } : member)));
+  }
+
+  function impersonateMember(memberId: string) {
+    setCurrentMemberId(memberId);
+    saveSession(memberId);
+    setView('dashboard');
   }
 
   if (!currentMember) {
@@ -411,7 +519,7 @@ export default function App() {
         <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl content-center gap-8">
           <div className="grid gap-5">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-ink text-white">
-              <Sparkles size={24} />
+              <img className="h-7 w-7" src={BRAND_ICON} alt="" />
             </div>
             <div className="max-w-2xl">
               <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Flat Reality Entertainment Group</p>
@@ -419,23 +527,52 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft md:max-w-md">
+          <form
+            className="grid gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft md:max-w-md"
+            autoComplete="on"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void login();
+            }}
+          >
             <label className="grid gap-2">
               <span className="text-sm font-medium text-zinc-600">Employment ID</span>
               <input
                 className="h-12 rounded-lg border border-line px-4 text-base outline-none transition focus:border-forest focus:ring-4 focus:ring-forest/10"
+                name="username"
+                autoComplete="username"
                 value={employmentId}
                 onChange={(event) => setEmploymentId(event.target.value)}
-                onKeyDown={(event) => event.key === 'Enter' && login()}
+              />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-sm font-medium text-zinc-600">Password</span>
+              <input
+                className="h-12 rounded-lg border border-line px-4 text-base outline-none transition focus:border-forest focus:ring-4 focus:ring-forest/10"
+                type="password"
+                name="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
               />
             </label>
             {loginError && <p className="text-sm text-red-600">{loginError}</p>}
-            <button className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-ink px-4 font-medium text-white transition hover:bg-zinc-700" onClick={login}>
+            <button className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-ink px-4 font-medium text-white transition hover:bg-zinc-700" type="submit">
               <BadgeCheck size={18} />
               Open Workspace
             </button>
-          </div>
+            <button className="justify-self-start text-sm font-medium text-forest" type="button" onClick={() => setIsRecoveryOpen(true)}>
+              Trouble signing in?
+            </button>
+          </form>
         </div>
+        {isRecoveryOpen && (
+          <RecoveryWizard
+            members={members}
+            updateMembers={updateMembers}
+            onClose={() => setIsRecoveryOpen(false)}
+          />
+        )}
       </main>
     );
   }
@@ -446,7 +583,7 @@ export default function App() {
         <aside className="rounded-xl border border-line bg-paper p-4 shadow-soft lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)]">
           <div className="flex items-center gap-3 border-b border-line pb-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-white">
-              <Sparkles size={20} />
+              <img className="h-6 w-6" src={BRAND_ICON} alt="" />
             </div>
             <div>
               <p className="font-semibold">Flat Reality</p>
@@ -475,7 +612,7 @@ export default function App() {
             <p className="mt-3 text-xs text-zinc-500">{saveStatus}</p>
           </div>
 
-          <button className="mt-4 flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-zinc-600 hover:bg-mist" onClick={() => setCurrentMemberId(null)}>
+          <button className="mt-4 flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-zinc-600 hover:bg-mist" onClick={() => { clearSession(); setCurrentMemberId(null); }}>
             <LogOut size={17} />
             Sign out
           </button>
@@ -497,6 +634,15 @@ export default function App() {
           {view === 'profile' && <Profile member={currentMember} updateCurrentMember={updateCurrentMember} />}
           {view === 'levelup' && <LevelUp member={currentMember} levels={levels} rewards={rewards} />}
           {view === 'careerGrowth' && <CareerGrowth member={currentMember} />}
+          {view === 'schedule' && currentMember.scheduleEnabled && (
+            <Schedule
+              member={currentMember}
+              shifts={scheduleShifts.filter((shift) => shift.memberId === currentMember.id)}
+              completions={scheduleCompletions.filter((completion) => completion.memberId === currentMember.id)}
+              setScheduleShifts={setScheduleShifts}
+              setScheduleCompletions={setScheduleCompletions}
+            />
+          )}
           {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} setWorkRecords={updateWorkRecords} />}
           {view === 'signedDocuments' && <SignedDocuments member={currentMember} />}
           {view === 'benefits' && <Placeholder title="Benefits" text="We are working on integrating this feature into Workspace!" />}
@@ -515,11 +661,105 @@ export default function App() {
               setGuidePages={setGuidePages}
               setWorkRecords={updateWorkRecords}
               updateWorkspace={updateMembers}
+              impersonateMember={impersonateMember}
             />
           )}
         </div>
       </div>
     </main>
+  );
+}
+
+function RecoveryWizard({ members, updateMembers, onClose }: { members: WorkspaceMember[]; updateMembers: WorkspaceUpdate; onClose: () => void }) {
+  const [employmentId, setEmploymentId] = useState('');
+  const [memberId, setMemberId] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [error, setError] = useState('');
+
+  function checkRecoveryOptions() {
+    const member = members.find((item) => item.employmentId.toLowerCase() === employmentId.trim().toLowerCase());
+    if (!member || member.passwordHash) {
+      setError('Recovery wizard cannot be used with these details. Contact your manager for manual recovery.');
+      setMemberId(null);
+      return;
+    }
+    setError('');
+    setMemberId(member.id);
+  }
+
+  async function saveNewPassword() {
+    if (newPassword.length < 6) {
+      setError('Password must contain at least 6 characters.');
+      return;
+    }
+    const passwordHash = await hashPassword(newPassword);
+    updateMembers(members.map((member) => (member.id === memberId ? { ...member, passwordHash } : member)));
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-end bg-ink/35 p-3 sm:place-items-center">
+      <div className="w-full max-w-md rounded-xl border border-line bg-paper p-5 shadow-soft">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Recovery Wizard</p>
+            <h2 className="mt-2 text-2xl font-semibold">{memberId ? 'Create new password' : 'Trouble signing in?'}</h2>
+          </div>
+          <button className="text-sm font-medium text-zinc-500" onClick={onClose}>Close</button>
+        </div>
+
+        {!memberId ? (
+          <form
+            className="mt-5 grid gap-4"
+            autoComplete="on"
+            onSubmit={(event) => {
+              event.preventDefault();
+              checkRecoveryOptions();
+            }}
+          >
+            <label className="grid gap-2">
+              <span className="text-sm font-medium text-zinc-600">Employment ID</span>
+              <input
+                className="h-12 rounded-lg border border-line px-4 text-base outline-none transition focus:border-forest focus:ring-4 focus:ring-forest/10"
+                name="username"
+                autoComplete="username"
+                value={employmentId}
+                onChange={(event) => setEmploymentId(event.target.value)}
+              />
+            </label>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <button className="h-12 rounded-lg bg-ink px-4 font-medium text-white" type="submit">
+              Check recovery options
+            </button>
+          </form>
+        ) : (
+          <form
+            className="mt-5 grid gap-4"
+            autoComplete="on"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveNewPassword();
+            }}
+          >
+            <label className="grid gap-2">
+              <span className="text-sm font-medium text-zinc-600">New Password</span>
+              <input
+                className="h-12 rounded-lg border border-line px-4 text-base outline-none transition focus:border-forest focus:ring-4 focus:ring-forest/10"
+                type="password"
+                name="new-password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+              />
+            </label>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <button className="h-12 rounded-lg bg-forest px-4 font-medium text-white" type="submit">
+              Save Password
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -849,6 +1089,488 @@ function CareerGrowth({ member }: { member: WorkspaceMember }) {
   );
 }
 
+function getCompletionStatus(actualHours: number, planned: number): ScheduleDayStatus {
+  if (actualHours === 0) return 'day_off';
+  return actualHours > planned ? 'overworked' : 'completed';
+}
+
+function Schedule({
+  member,
+  shifts,
+  completions,
+  setScheduleShifts,
+  setScheduleCompletions,
+}: {
+  member: WorkspaceMember;
+  shifts: ScheduleShift[];
+  completions: ScheduleDayCompletion[];
+  setScheduleShifts: Dispatch<SetStateAction<ScheduleShift[]>>;
+  setScheduleCompletions: Dispatch<SetStateAction<ScheduleDayCompletion[]>>;
+}) {
+  const weekStart = getWeekStart();
+  const [editingShift, setEditingShift] = useState<ScheduleShift | null>(null);
+  const [creatingDayIndex, setCreatingDayIndex] = useState<number | null>(null);
+  const [completingDayIndex, setCompletingDayIndex] = useState<number | null>(null);
+  const [isPlanningNextWeek, setIsPlanningNextWeek] = useState(false);
+  const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const hours = Array.from({ length: 17 }, (_, index) => index + 6);
+  const weekShifts = shifts.filter((shift) => shift.weekStart === weekStart);
+  const weekCompletions = completions.filter((completion) => completion.weekStart === weekStart);
+  const nextWeekStart = addDays(weekStart, 7);
+  const previousWeekStart = addDays(weekStart, -7);
+  const nextWeekShifts = shifts.filter((shift) => shift.weekStart === nextWeekStart);
+  const previousWeekShifts = shifts.filter((shift) => shift.weekStart === previousWeekStart);
+  const previousWeekCompletions = completions.filter((completion) => completion.weekStart === previousWeekStart);
+  const actualHoursTotal = Math.floor(weekCompletions.reduce((total, completion) => total + completion.actualHours, 0));
+  const estimatedHours = parseEstimatedHours(member.estimatedHours);
+  const isOverEstimated = estimatedHours > 0 && actualHoursTotal > estimatedHours;
+  const isExactEstimated = estimatedHours > 0 && actualHoursTotal === estimatedHours;
+  const HeaderIcon = isOverEstimated ? Ban : CalendarDays;
+
+  function dayShifts(dayIndex: number) {
+    return weekShifts.filter((shift) => shift.dayIndex === dayIndex).sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }
+
+  function dayCompletion(dayIndex: number) {
+    return weekCompletions.find((completion) => completion.dayIndex === dayIndex);
+  }
+
+  function canComplete(dayIndex: number) {
+    return addDays(weekStart, dayIndex) <= today();
+  }
+
+  function removeShift(id: string) {
+    setScheduleShifts((items) => items.filter((shift) => shift.id !== id));
+    setEditingShift(null);
+  }
+
+  return (
+    <div className="grid gap-6">
+      <section className="animate-panel rounded-xl border border-line bg-paper p-6 shadow-soft">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div className="flex items-center gap-4">
+            <span className={`flex h-12 w-12 items-center justify-center rounded-xl ${isOverEstimated ? 'bg-red-100 text-red-600' : 'bg-forest/10 text-forest'}`}>
+              <HeaderIcon size={24} />
+            </span>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Schedule β</p>
+              <h1 className={`mt-2 text-3xl font-semibold md:text-5xl ${isOverEstimated ? 'text-red-600' : isExactEstimated ? 'text-emerald-600' : 'text-ink'}`}>
+                Estimated hours: {actualHoursTotal}h / {estimatedHours || 0}h
+              </h1>
+            </div>
+          </div>
+          <span className="rounded-lg bg-mist px-3 py-2 text-sm font-medium">{formatDate(weekStart)} - {formatDate(addDays(weekStart, 6))}</span>
+        </div>
+      </section>
+
+      <section className="animate-panel overflow-x-auto rounded-xl border border-line bg-paper p-4 shadow-soft">
+        <div className="min-w-[980px]">
+          <div className="grid grid-cols-[70px_repeat(7,minmax(125px,1fr))] border-b border-line">
+            <div className="p-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-400">Time</div>
+            {weekDays.map((day, dayIndex) => {
+              const planned = plannedHours(dayShifts(dayIndex));
+              const completion = dayCompletion(dayIndex);
+              const status = completion ? getCompletionStatus(completion.actualHours, planned) : null;
+              const statusClass = status === 'completed' ? 'bg-emerald-500' : status === 'overworked' ? 'bg-orange-500' : status === 'day_off' ? 'bg-sky-500' : 'bg-ink';
+              return (
+                <div key={day} className="border-l border-line p-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold">{day}</p>
+                      <p className="text-xs text-zinc-500">{formatDate(addDays(weekStart, dayIndex))}</p>
+                    </div>
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${completion ? `${statusClass} text-white` : 'bg-mist text-zinc-700'}`}>
+                      <span className={`h-2 w-2 rounded-full ${completion ? 'bg-white' : 'bg-ink'}`} />
+                      {formatHours(Math.floor(completion?.actualHours ?? planned))}
+                    </span>
+                  </div>
+                  <button className="mt-3 h-9 w-full rounded-lg bg-forest px-2 text-sm font-medium text-white" onClick={() => { setIsPlanningNextWeek(false); setCreatingDayIndex(dayIndex); }}>
+                    + Create Shift
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid grid-cols-[70px_repeat(7,minmax(125px,1fr))]">
+            <div className="grid">
+              {hours.map((hour) => (
+                <div key={hour} className="h-16 border-b border-line pr-2 pt-1 text-right text-xs text-zinc-500">{String(hour).padStart(2, '0')}:00</div>
+              ))}
+            </div>
+            {weekDays.map((day, dayIndex) => {
+              const shiftsForDay = dayShifts(dayIndex);
+              const completion = dayCompletion(dayIndex);
+              const planned = plannedHours(shiftsForDay);
+              const status = completion ? getCompletionStatus(completion.actualHours, planned) : null;
+              return (
+                <div key={day} className="relative border-l border-line">
+                  {hours.map((hour) => (
+                    <div key={hour} className="h-16 border-b border-line" />
+                  ))}
+                  {shiftsForDay.map((shift) => {
+                    const top = ((timeToMinutes(shift.startTime) - 6 * 60) / 60) * 64;
+                    const height = Math.max(44, ((timeToMinutes(shift.endTime) - timeToMinutes(shift.startTime)) / 60) * 64);
+                    return (
+                      <button
+                        key={shift.id}
+                        className="absolute left-2 right-2 rounded-xl bg-forest/90 p-3 text-left text-white shadow-soft transition hover:bg-forest"
+                        style={{ top, height }}
+                        onClick={() => setEditingShift(shift)}
+                      >
+                        <span className="block text-sm font-semibold">Workspace Shift</span>
+                        <span className="mt-1 block text-xs">{shift.startTime}-{shift.endTime}</span>
+                      </button>
+                    );
+                  })}
+                  <div className="sticky bottom-0 z-10 border-t border-line bg-paper/95 p-2 backdrop-blur">
+                    {completion && (
+                      <p className={`mb-2 rounded-lg px-2 py-1 text-center text-xs font-semibold text-white ${status === 'completed' ? 'bg-emerald-500' : status === 'overworked' ? 'bg-orange-500' : 'bg-sky-500'}`}>
+                        {status === 'completed' ? 'Completed' : status === 'overworked' ? 'Overworked' : 'Day Off'}
+                      </p>
+                    )}
+                    <button className="h-9 w-full rounded-lg border border-line bg-white px-2 text-xs font-medium disabled:text-zinc-400" disabled={!canComplete(dayIndex)} onClick={() => setCompletingDayIndex(dayIndex)}>
+                      Complete Shift
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <NextWeekPlanningCard
+        memberId={member.id}
+        weekDays={weekDays}
+        hours={hours}
+        currentWeekStart={weekStart}
+        nextWeekStart={nextWeekStart}
+        currentWeekShifts={weekShifts}
+        nextWeekShifts={nextWeekShifts}
+        estimatedHours={estimatedHours}
+        isPlanning={isPlanningNextWeek}
+        setIsPlanning={setIsPlanningNextWeek}
+        setEditingShift={setEditingShift}
+        setCreatingDayIndex={setCreatingDayIndex}
+        setScheduleShifts={setScheduleShifts}
+      />
+
+      <PastWeekStatsCard
+        weekStart={previousWeekStart}
+        shifts={previousWeekShifts}
+        completions={previousWeekCompletions}
+        estimatedHours={estimatedHours}
+      />
+
+      {(creatingDayIndex !== null || editingShift) && (
+        <ShiftEditor
+          dayName={weekDays[editingShift?.dayIndex ?? creatingDayIndex ?? 0]}
+          shift={editingShift}
+          defaultDayIndex={creatingDayIndex ?? 0}
+          weekStart={editingShift?.weekStart ?? (isPlanningNextWeek ? nextWeekStart : weekStart)}
+          memberId={member.id}
+          onClose={() => {
+            setCreatingDayIndex(null);
+            setEditingShift(null);
+          }}
+          onDelete={removeShift}
+          setScheduleShifts={setScheduleShifts}
+        />
+      )}
+
+      {completingDayIndex !== null && (
+        <CompleteShiftSheet
+          dayName={weekDays[completingDayIndex]}
+          planned={plannedHours(dayShifts(completingDayIndex))}
+          completion={dayCompletion(completingDayIndex)}
+          onClose={() => setCompletingDayIndex(null)}
+          onSave={(actualHours) => {
+            setScheduleCompletions((items) => {
+              const existing = items.find((item) => item.memberId === member.id && item.weekStart === weekStart && item.dayIndex === completingDayIndex);
+              const nextCompletion: ScheduleDayCompletion = {
+                id: existing?.id ?? `completion-${Date.now()}`,
+                memberId: member.id,
+                weekStart,
+                dayIndex: completingDayIndex,
+                actualHours,
+                completedAt: new Date().toISOString(),
+              };
+              return existing ? items.map((item) => (item.id === existing.id ? nextCompletion : item)) : [...items, nextCompletion];
+            });
+            setCompletingDayIndex(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ShiftEditor({
+  dayName,
+  shift,
+  defaultDayIndex,
+  weekStart,
+  memberId,
+  onClose,
+  onDelete,
+  setScheduleShifts,
+}: {
+  dayName: string;
+  shift: ScheduleShift | null;
+  defaultDayIndex: number;
+  weekStart: string;
+  memberId: string;
+  onClose: () => void;
+  onDelete: (id: string) => void;
+  setScheduleShifts: Dispatch<SetStateAction<ScheduleShift[]>>;
+}) {
+  const [startTime, setStartTime] = useState(shift?.startTime ?? '09:00');
+  const [endTime, setEndTime] = useState(shift?.endTime ?? '17:00');
+  const [error, setError] = useState('');
+
+  function saveShift() {
+    if (timeToMinutes(endTime) <= timeToMinutes(startTime)) {
+      setError('End time must be later than start time.');
+      return;
+    }
+    setScheduleShifts((items) => {
+      const nextShift: ScheduleShift = {
+        id: shift?.id ?? `shift-${Date.now()}`,
+        memberId,
+        weekStart,
+        dayIndex: shift?.dayIndex ?? defaultDayIndex,
+        startTime,
+        endTime,
+      };
+      return shift ? items.map((item) => (item.id === shift.id ? nextShift : item)) : [...items, nextShift];
+    });
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-end bg-ink/35 p-3 sm:place-items-center">
+      <div className="w-full max-w-md rounded-xl border border-line bg-paper p-5 shadow-soft">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">{dayName}</p>
+            <h2 className="mt-2 text-2xl font-semibold">{shift ? 'Edit Shift' : 'Create Shift'}</h2>
+          </div>
+          <button className="text-sm font-medium text-zinc-500" onClick={onClose}>Close</button>
+        </div>
+        <div className="mt-5 grid gap-4">
+          <Field label="Start Time" type="time" value={startTime} onChange={setStartTime} />
+          <Field label="End Time" type="time" value={endTime} onChange={setEndTime} />
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex flex-wrap gap-3">
+            <button className="h-11 rounded-lg bg-forest px-4 text-sm font-medium text-white" onClick={saveShift}>Save Shift</button>
+            {shift && <button className="h-11 rounded-lg border border-red-200 px-4 text-sm font-medium text-red-600" onClick={() => onDelete(shift.id)}>Delete Shift</button>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompleteShiftSheet({ dayName, planned, completion, onClose, onSave }: { dayName: string; planned: number; completion?: ScheduleDayCompletion; onClose: () => void; onSave: (actualHours: number) => void }) {
+  const [actualHours, setActualHours] = useState(String(completion?.actualHours ?? Math.floor(planned)));
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-end bg-ink/35 p-3 sm:place-items-center">
+      <div className="w-full max-w-md rounded-xl border border-line bg-paper p-5 shadow-soft">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">{dayName}</p>
+            <h2 className="mt-2 text-2xl font-semibold">Complete Shift</h2>
+            <p className="mt-2 text-sm text-zinc-600">Planned time: {formatHours(planned)}</p>
+          </div>
+          <button className="text-sm font-medium text-zinc-500" onClick={onClose}>Close</button>
+        </div>
+        <div className="mt-5 grid gap-4">
+          <Field label="Actual Hours" type="number" value={actualHours} onChange={setActualHours} />
+          <button className="h-11 rounded-lg bg-forest px-4 text-sm font-medium text-white" onClick={() => onSave(Math.max(0, Number(actualHours) || 0))}>
+            Save Actual Time
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NextWeekPlanningCard({
+  memberId,
+  weekDays,
+  hours,
+  currentWeekStart,
+  nextWeekStart,
+  currentWeekShifts,
+  nextWeekShifts,
+  estimatedHours,
+  isPlanning,
+  setIsPlanning,
+  setEditingShift,
+  setCreatingDayIndex,
+  setScheduleShifts,
+}: {
+  memberId: string;
+  weekDays: string[];
+  hours: number[];
+  currentWeekStart: string;
+  nextWeekStart: string;
+  currentWeekShifts: ScheduleShift[];
+  nextWeekShifts: ScheduleShift[];
+  estimatedHours: number;
+  isPlanning: boolean;
+  setIsPlanning: (value: boolean) => void;
+  setEditingShift: (shift: ScheduleShift | null) => void;
+  setCreatingDayIndex: (dayIndex: number | null) => void;
+  setScheduleShifts: Dispatch<SetStateAction<ScheduleShift[]>>;
+}) {
+  const todayDay = new Date().getDay();
+  const canPlanNextWeek = todayDay === 0 || todayDay >= 3;
+  const plannedNextHours = plannedHours(nextWeekShifts);
+  const isReady = nextWeekShifts.length > 0 && !isPlanning;
+
+  if (!canPlanNextWeek) return null;
+
+  function startPlanning() {
+    setScheduleShifts((items) => {
+      const alreadyHasNextWeek = items.some((shift) => shift.memberId === memberId && shift.weekStart === nextWeekStart);
+      if (alreadyHasNextWeek) return items;
+      const duplicated = currentWeekShifts.map((shift) => ({
+        ...shift,
+        id: `shift-${Date.now()}-${shift.dayIndex}-${shift.startTime}`,
+        weekStart: nextWeekStart,
+      }));
+      return [...items, ...duplicated];
+    });
+    setIsPlanning(true);
+  }
+
+  function dayShifts(dayIndex: number) {
+    return nextWeekShifts.filter((shift) => shift.dayIndex === dayIndex).sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }
+
+  return (
+    <section className="animate-panel rounded-xl border border-line bg-paper p-5 shadow-soft">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+        <div className="flex items-start gap-4">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-forest/10 text-forest">
+            {isReady ? <CheckCircle2 size={22} /> : <CalendarDays size={22} />}
+          </span>
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Next Week</p>
+            <h2 className="mt-2 text-2xl font-semibold">{isReady ? 'Your next week is ready!' : 'Plan your next week!'}</h2>
+            {isReady && <p className="mt-2 text-zinc-600">Estimated hours: {Math.floor(plannedNextHours)} / {estimatedHours || 0} hours</p>}
+            {!isReady && !isPlanning && <p className="mt-2 text-zinc-600">Start from a copy of your current week and adjust shifts before saving.</p>}
+          </div>
+        </div>
+        {isReady ? (
+          <button className="rounded-lg border border-line bg-white p-2 text-zinc-600 hover:text-forest" aria-label="Edit next week planning" onClick={() => setIsPlanning(true)}>
+            <PenLine size={18} />
+          </button>
+        ) : !isPlanning ? (
+          <button className="h-11 rounded-lg bg-forest px-4 text-sm font-medium text-white" onClick={startPlanning}>
+            Start Planning
+          </button>
+        ) : null}
+      </div>
+
+      {isPlanning && (
+        <div className="mt-5 grid gap-4">
+          <div className="overflow-x-auto rounded-xl border border-line">
+            <div className="min-w-[980px]">
+              <div className="grid grid-cols-[70px_repeat(7,minmax(125px,1fr))] border-b border-line">
+                <div className="p-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-400">Time</div>
+                {weekDays.map((day, dayIndex) => (
+                  <div key={day} className="border-l border-line p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">{day}</p>
+                        <p className="text-xs text-zinc-500">{formatDate(addDays(nextWeekStart, dayIndex))}</p>
+                      </div>
+                      <span className="rounded-full bg-mist px-2 py-1 text-xs font-semibold text-zinc-700">{formatHours(plannedHours(dayShifts(dayIndex)))}</span>
+                    </div>
+                    <button className="mt-3 h-9 w-full rounded-lg bg-forest px-2 text-sm font-medium text-white" onClick={() => { setIsPlanning(true); setCreatingDayIndex(dayIndex); }}>
+                      + Create Shift
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-[70px_repeat(7,minmax(125px,1fr))]">
+                <div className="grid">
+                  {hours.map((hour) => (
+                    <div key={hour} className="h-16 border-b border-line pr-2 pt-1 text-right text-xs text-zinc-500">{String(hour).padStart(2, '0')}:00</div>
+                  ))}
+                </div>
+                {weekDays.map((day, dayIndex) => (
+                  <div key={day} className="relative border-l border-line">
+                    {hours.map((hour) => (
+                      <div key={hour} className="h-16 border-b border-line" />
+                    ))}
+                    {dayShifts(dayIndex).map((shift) => {
+                      const top = ((timeToMinutes(shift.startTime) - 6 * 60) / 60) * 64;
+                      const height = Math.max(44, ((timeToMinutes(shift.endTime) - timeToMinutes(shift.startTime)) / 60) * 64);
+                      return (
+                        <button
+                          key={shift.id}
+                          className="absolute left-2 right-2 rounded-xl bg-forest/90 p-3 text-left text-white shadow-soft transition hover:bg-forest"
+                          style={{ top, height }}
+                          onClick={() => {
+                            setIsPlanning(true);
+                            setEditingShift(shift);
+                          }}
+                        >
+                          <span className="block text-sm font-semibold">Workspace Shift</span>
+                          <span className="mt-1 block text-xs">{shift.startTime}-{shift.endTime}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <button className="justify-self-start rounded-lg bg-forest px-4 py-3 text-sm font-semibold text-white" onClick={() => setIsPlanning(false)}>
+            Finish Planning
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PastWeekStatsCard({ weekStart, shifts, completions, estimatedHours }: { weekStart: string; shifts: ScheduleShift[]; completions: ScheduleDayCompletion[]; estimatedHours: number }) {
+  const actualHours = Math.floor(completions.reduce((total, completion) => total + completion.actualHours, 0));
+  const overworkedDays = completions.filter((completion) => completion.actualHours > plannedHours(shifts.filter((shift) => shift.dayIndex === completion.dayIndex))).length;
+  const dayOffCount = completions.filter((completion) => completion.actualHours === 0).length;
+
+  return (
+    <section className="animate-panel rounded-xl border border-line bg-paper p-5 shadow-soft">
+      <div className="flex items-start gap-4">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-mist text-forest">
+          <TrendingUp size={22} />
+        </span>
+        <div className="grid gap-3">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Past Week Stats</p>
+            <h2 className="mt-2 text-2xl font-semibold">Past Week Stats</h2>
+          </div>
+          <div className="grid gap-2 text-sm text-zinc-600 sm:grid-cols-2 lg:grid-cols-4">
+            <p><span className="font-medium text-ink">Period:</span> {formatDate(weekStart)} - {formatDate(addDays(weekStart, 6))}</p>
+            <p><span className="font-medium text-ink">Hours:</span> {actualHours} / {estimatedHours || 0}</p>
+            <p className="inline-flex items-center gap-2">
+              <span><span className="font-medium text-ink">Overworked days:</span> {overworkedDays}</span>
+              {overworkedDays > 0 && <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white"><Ban size={12} /></span>}
+            </p>
+            <p><span className="font-medium text-ink">Days off:</span> {dayOffCount}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function WorkRecordsPage({ member, records, setWorkRecords }: { member: WorkspaceMember; records: WorkRecord[]; setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>> }) {
   const sortedRecords = sortRecordsNewestFirst(records);
   const healthIcon = member.strikeSystem === 0 ? '👍' : member.strikeSystem === 1 ? '🫤' : '☹️';
@@ -1011,6 +1733,7 @@ function Admin({
   setGuidePages,
   setWorkRecords,
   updateWorkspace,
+  impersonateMember,
 }: {
   members: WorkspaceMember[];
   levels: Level[];
@@ -1023,10 +1746,11 @@ function Admin({
   setGuidePages: Dispatch<SetStateAction<GuidePage[]>>;
   setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>>;
   updateWorkspace: WorkspaceUpdate;
+  impersonateMember: (memberId: string) => void;
 }) {
   const [module, setModule] = useState<AdminModule>('home');
 
-  if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} onBack={() => setModule('home')} />;
+  if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} impersonateMember={impersonateMember} onBack={() => setModule('home')} />;
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
 
@@ -1034,6 +1758,7 @@ function Admin({
     ['hr', UsersRound, 'HR', 'Users, contracts, documents, payments, statuses and work records.'],
     ['guides', BookOpen, 'Guide Writting', 'Create and edit workspace guide pages.'],
     ['levelup', Trophy, 'LevelUp! Configurator', 'Configure levels, XP requirements and rewards.'],
+    ['supabase', ExternalLink, 'Supabase Control', 'Open the connected Supabase project dashboard.'],
   ];
 
   return (
@@ -1044,7 +1769,17 @@ function Admin({
       </section>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {modules.map(([key, Icon, title, description]) => (
-          <button key={key} className="flex min-h-32 items-start gap-4 rounded-xl border border-line bg-paper p-5 text-left shadow-soft transition hover:-translate-y-0.5" onClick={() => setModule(key)}>
+          <button
+            key={key}
+            className="flex min-h-32 items-start gap-4 rounded-xl border border-line bg-paper p-5 text-left shadow-soft transition hover:-translate-y-0.5"
+            onClick={() => {
+              if (key === 'supabase') {
+                window.open('https://supabase.com/dashboard/project/kcsxspifrkuhbdmfahoy?method=github', '_blank', 'noreferrer');
+                return;
+              }
+              setModule(key);
+            }}
+          >
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-mist text-forest">
               <Icon size={21} />
             </span>
@@ -1075,6 +1810,7 @@ function HrAdmin({
   setMembers,
   setWorkRecords,
   updateWorkspace,
+  impersonateMember,
   onBack,
 }: {
   members: WorkspaceMember[];
@@ -1084,6 +1820,7 @@ function HrAdmin({
   setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>;
   setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>>;
   updateWorkspace: WorkspaceUpdate;
+  impersonateMember: (memberId: string) => void;
   onBack: () => void;
 }) {
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
@@ -1153,6 +1890,7 @@ function HrAdmin({
           updateMember={updateMember}
           setMembers={setMembers}
           setWorkRecords={setWorkRecords}
+          impersonateMember={impersonateMember}
           onBack={() => setSelectedMemberId(null)}
         />
       )}
@@ -1187,6 +1925,7 @@ function MemberEditor({
   updateMember,
   setMembers,
   setWorkRecords,
+  impersonateMember,
   onBack,
 }: {
   member: WorkspaceMember;
@@ -1198,6 +1937,7 @@ function MemberEditor({
   updateMember: (changes: Partial<WorkspaceMember>) => void;
   setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>;
   setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>>;
+  impersonateMember: (memberId: string) => void;
   onBack: () => void;
 }) {
   const tabs: Array<[HrTab, LucideIcon, string]> = [
@@ -1206,6 +1946,7 @@ function MemberEditor({
     ['levelup', Trophy, 'LevelUp!'],
     ['payments', WalletCards, 'Payments'],
     ['documents', FileCheck2, 'Documents'],
+    ['schedule', CalendarDays, 'Schedule'],
   ];
 
   return (
@@ -1225,16 +1966,17 @@ function MemberEditor({
           ))}
         </div>
       </section>
-      {tab === 'profile' && <AdminProfileTab member={member} updateMember={updateMember} setMembers={setMembers} />}
+      {tab === 'profile' && <AdminProfileTab member={member} updateMember={updateMember} setMembers={setMembers} impersonateMember={impersonateMember} />}
       {tab === 'records' && <AdminRecordsTab member={member} records={records} setWorkRecords={setWorkRecords} />}
       {tab === 'levelup' && <AdminMemberLevelUpTab member={member} levels={levels} rewards={rewards} updateMember={updateMember} />}
       {tab === 'payments' && <AdminPaymentsTab member={member} updateMember={updateMember} />}
       {tab === 'documents' && <AdminDocumentsTab member={member} updateMember={updateMember} />}
+      {tab === 'schedule' && <AdminScheduleTab member={member} updateMember={updateMember} />}
     </div>
   );
 }
 
-function AdminProfileTab({ member, updateMember, setMembers }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>> }) {
+function AdminProfileTab({ member, updateMember, setMembers, impersonateMember }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; impersonateMember: (memberId: string) => void }) {
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <Section title="Profile">
@@ -1273,9 +2015,34 @@ function AdminProfileTab({ member, updateMember, setMembers }: { member: Workspa
         </div>
         {statusOptions.find((option) => option.value === member.status)?.needsDate && <Field label={`${statusLabel(member.status)} end date`} type="date" value={member.statusUntil} onChange={(value) => updateMember({ statusUntil: value })} />}
       </Section>
+      <Section title="Debug">
+        <div className="flex flex-wrap gap-3">
+          <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-zinc-700" onClick={() => updateMember({ passwordHash: '' })}>
+            <RotateCcw size={16} />
+            Reset Password
+          </button>
+          <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-3 text-sm font-medium text-white" onClick={() => impersonateMember(member.id)}>
+            <KeyRound size={16} />
+            Sign In As This User
+          </button>
+        </div>
+      </Section>
       <button className="justify-self-start rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600" onClick={() => setMembers((items) => items.filter((item) => item.id !== member.id))}>
         Delete User
       </button>
+    </div>
+  );
+}
+
+function AdminScheduleTab({ member, updateMember }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
+  return (
+    <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
+      <Section title="Schedule">
+        <label className="flex h-11 items-center gap-3 rounded-lg border border-line px-3 text-sm font-medium text-zinc-600">
+          <input type="checkbox" checked={member.scheduleEnabled} onChange={(event) => updateMember({ scheduleEnabled: event.target.checked })} />
+          Enable Schedule Module (Beta)
+        </label>
+      </Section>
     </div>
   );
 }

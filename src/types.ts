@@ -3,6 +3,7 @@ export type ContractType = 'CORE TEAM' | 'INDEPENDENT PARTNER';
 export type BenefitProgram = 'FR Partners' | 'The Nick' | 'RAIN HEART';
 export type OnboardingContractType = 'None' | 'MASTER SERVICE AGREEMENT';
 export type WorkRecordType = 'standard' | 'positive' | 'strike' | 'negative' | 'explanation_request';
+export type ScheduleDayStatus = 'completed' | 'overworked' | 'day_off';
 
 export type WorkRecord = {
   id: string;
@@ -63,6 +64,26 @@ export type WorkspaceMember = {
   status: MemberStatus;
   statusUntil: string;
   isAdmin: boolean;
+  passwordHash: string;
+  scheduleEnabled: boolean;
+};
+
+export type ScheduleShift = {
+  id: string;
+  memberId: string;
+  weekStart: string;
+  dayIndex: number;
+  startTime: string;
+  endTime: string;
+};
+
+export type ScheduleDayCompletion = {
+  id: string;
+  memberId: string;
+  weekStart: string;
+  dayIndex: number;
+  actualHours: number;
+  completedAt: string;
 };
 
 export type Level = {
@@ -86,7 +107,7 @@ export type JumpLink = {
   icon: string;
   url: string;
   order: number;
-  internalView?: 'profile' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'levelup' | 'careerGrowth';
+  internalView?: 'profile' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'levelup' | 'careerGrowth' | 'schedule';
 };
 
 export type GuidePage = {
@@ -102,4 +123,6 @@ export type WorkspaceState = {
   rewards: Reward[];
   guidePages: GuidePage[];
   workRecords: WorkRecord[];
+  scheduleShifts: ScheduleShift[];
+  scheduleCompletions: ScheduleDayCompletion[];
 };

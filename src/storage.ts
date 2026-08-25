@@ -1,6 +1,6 @@
 import { emptyMember, initialGuidePages, initialLevels, initialMembers, initialRewards, initialWorkRecords } from './data';
 import { supabase } from './supabase';
-import type { WorkspaceMember, WorkspaceState } from './types';
+import type { ScheduleDayCompletion, ScheduleShift, WorkspaceMember, WorkspaceState } from './types';
 
 const STORAGE_KEY = 'flat-reality-workspace-state';
 const SUPABASE_STATE_ID = 'workspace';
@@ -11,6 +11,8 @@ export const defaultWorkspaceState: WorkspaceState = {
   rewards: initialRewards,
   guidePages: initialGuidePages,
   workRecords: initialWorkRecords,
+  scheduleShifts: [],
+  scheduleCompletions: [],
 };
 
 function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
@@ -28,6 +30,30 @@ function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
     strikeSystem: Number(member.strikeSystem ?? 0),
     xp: Number(member.xp ?? 0),
     statusUntil: member.statusUntil ?? '',
+    passwordHash: member.passwordHash ?? '',
+    scheduleEnabled: Boolean(member.scheduleEnabled),
+  };
+}
+
+function normalizeShift(shift: Partial<ScheduleShift>): ScheduleShift {
+  return {
+    id: shift.id ?? `shift-${Date.now()}`,
+    memberId: shift.memberId ?? '',
+    weekStart: shift.weekStart ?? '',
+    dayIndex: Number(shift.dayIndex ?? 0),
+    startTime: shift.startTime ?? '09:00',
+    endTime: shift.endTime ?? '17:00',
+  };
+}
+
+function normalizeCompletion(completion: Partial<ScheduleDayCompletion>): ScheduleDayCompletion {
+  return {
+    id: completion.id ?? `completion-${Date.now()}`,
+    memberId: completion.memberId ?? '',
+    weekStart: completion.weekStart ?? '',
+    dayIndex: Number(completion.dayIndex ?? 0),
+    actualHours: Number(completion.actualHours ?? 0),
+    completedAt: completion.completedAt ?? '',
   };
 }
 
@@ -40,6 +66,8 @@ function normalizeWorkspaceState(state: Partial<WorkspaceState>): WorkspaceState
     rewards: state.rewards ?? defaultWorkspaceState.rewards,
     guidePages: state.guidePages?.length ? state.guidePages : defaultWorkspaceState.guidePages,
     workRecords: state.workRecords?.length ? state.workRecords : defaultWorkspaceState.workRecords,
+    scheduleShifts: state.scheduleShifts?.map(normalizeShift) ?? [],
+    scheduleCompletions: state.scheduleCompletions?.map(normalizeCompletion) ?? [],
   };
 }
 
