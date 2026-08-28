@@ -70,6 +70,7 @@ type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord
 const SESSION_KEY = 'flat-reality-workspace-session';
 const SESSION_DURATION_MS = 90 * 24 * 60 * 60 * 1000;
 const BRAND_ICON = '/resources/favicon/favicon-32x32.png';
+const THEME_OVERRIDE_KEY = 'flat-reality-workspace-theme-override';
 
 const iconMap: Record<string, LucideIcon> = {
   HeartHandshake,
@@ -83,6 +84,7 @@ const iconMap: Record<string, LucideIcon> = {
   TrendingUp,
   CalendarDays,
   Download,
+  Settings2,
 };
 
 const statusOptions: Array<{ value: MemberStatus; label: string; icon: LucideIcon; needsDate: boolean; blocksLogin: boolean }> = [
@@ -412,6 +414,7 @@ export default function App() {
   const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
   const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
   const [loginIntroName, setLoginIntroName] = useState('');
+  const [forceLightTheme, setForceLightTheme] = useState(() => window.localStorage.getItem(THEME_OVERRIDE_KEY) === 'light');
   const [view, setView] = useState<View>('dashboard');
   const [loginError, setLoginError] = useState('');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -459,6 +462,16 @@ export default function App() {
       .then(() => setSaveStatus(isSupabaseConfigured ? 'Saved to database' : 'Saved locally in this browser'))
       .catch(() => setSaveStatus('Could not save to database. Local copy is still saved.'));
   }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, isLoaded]);
+
+  useEffect(() => {
+    if (forceLightTheme) {
+      document.documentElement.dataset.theme = 'light';
+      window.localStorage.setItem(THEME_OVERRIDE_KEY, 'light');
+      return;
+    }
+    delete document.documentElement.dataset.theme;
+    window.localStorage.removeItem(THEME_OVERRIDE_KEY);
+  }, [forceLightTheme]);
 
   const currentMember = members.find((member) => member.id === currentMemberId) ?? null;
   const currentLevel = currentMember ? getCurrentLevel(levels, currentMember.xp) : levels[0];
@@ -655,6 +668,7 @@ export default function App() {
               jumpLinks={jumpLinks}
               workRecords={workRecords}
               setView={setView}
+              toggleTheme={() => setForceLightTheme((value) => !value)}
             />
           )}
           {view === 'profile' && <Profile member={currentMember} updateCurrentMember={updateCurrentMember} />}
@@ -692,11 +706,11 @@ export default function App() {
           )}
         </div>
       </div>
-      <nav className="fixed inset-x-3 bottom-3 z-40 grid grid-flow-col auto-cols-fr gap-1 rounded-[18px] border border-line bg-paper/95 p-2 shadow-soft backdrop-blur lg:hidden">
+      <nav className="mobile-tabbar fixed inset-x-0 bottom-0 z-40 grid grid-flow-col auto-cols-fr gap-1 rounded-t-[24px] border-x-0 border-b-0 border-t border-line bg-paper/95 px-2 pt-2 shadow-soft backdrop-blur lg:hidden">
         {navItems.map(([key, Icon, label]) => (
           <button
             key={key}
-            className={`grid min-h-[58px] place-items-center gap-1 rounded-2xl px-2 text-[11px] font-medium transition ${
+            className={`grid min-h-[58px] place-items-center gap-1 rounded-[18px] px-2 text-[11px] font-medium transition ${
               view === key ? 'bg-forest text-white' : 'text-zinc-600'
             }`}
             onClick={() => setView(key)}
@@ -812,6 +826,7 @@ function Dashboard({
   jumpLinks,
   workRecords,
   setView,
+  toggleTheme,
 }: {
   member: WorkspaceMember;
   currentLevel: Level;
@@ -821,6 +836,7 @@ function Dashboard({
   jumpLinks: JumpLink[];
   workRecords: WorkRecord[];
   setView: (view: View) => void;
+  toggleTheme: () => void;
 }) {
   const pendingUserRequest = workRecords.find((record) => record.memberId === member.id && record.type === 'explanation_request' && !record.explanationText);
   const unreadExplanationCount = member.isAdmin ? workRecords.filter((record) => record.type === 'explanation_request' && record.explanationText).length : 0;
@@ -982,6 +998,13 @@ function Dashboard({
             if (link.internalView) {
               return (
                 <button key={link.id} className="flex min-h-20 items-center gap-4 rounded-xl border border-line bg-paper p-4 text-left shadow-soft transition hover:-translate-y-0.5" onClick={() => setView(link.internalView as View)}>
+                  {content}
+                </button>
+              );
+            }
+            if (link.url === '#theme') {
+              return (
+                <button key={link.id} className="flex min-h-20 items-center gap-4 rounded-xl border border-line bg-paper p-4 text-left shadow-soft transition hover:-translate-y-0.5" onClick={toggleTheme}>
                   {content}
                 </button>
               );

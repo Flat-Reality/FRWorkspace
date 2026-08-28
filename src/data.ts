@@ -65,6 +65,7 @@ export const initialJumpLinks: JumpLink[] = [
   { id: 'jump-7', title: 'Career Growth', icon: 'TrendingUp', url: '#career-growth', order: 6, internalView: 'careerGrowth' },
   { id: 'jump-8', title: 'Signed Documents', icon: 'FileCheck2', url: '#signed-documents', order: 7, internalView: 'signedDocuments' },
   { id: 'jump-9', title: 'Installs', icon: 'Download', url: '#installs', order: 8, internalView: 'installs' },
+  { id: 'jump-10', title: 'Theme', icon: 'Settings2', url: '#theme', order: 9 },
 ];
 
 export const initialGuidePages: GuidePage[] = [
