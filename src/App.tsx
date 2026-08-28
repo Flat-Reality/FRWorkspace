@@ -82,6 +82,7 @@ const iconMap: Record<string, LucideIcon> = {
   Trophy,
   TrendingUp,
   CalendarDays,
+  Download,
 };
 
 const statusOptions: Array<{ value: MemberStatus; label: string; icon: LucideIcon; needsDate: boolean; blocksLogin: boolean }> = [
@@ -470,18 +471,15 @@ export default function App() {
   const navItems: Array<[View, LucideIcon, string]> =
     currentMember?.status === 'suspended'
       ? [
-          ['dashboard', LayoutDashboard, 'Dashboard'],
-          ['profile', UserRound, 'Update Profile'],
+          ['dashboard', LayoutDashboard, 'Home'],
+          ['profile', UserRound, 'Profile'],
         ]
       : [
-          ['dashboard', LayoutDashboard, 'Dashboard'],
-          ['profile', UserRound, 'Profile'],
-          ['levelup', Trophy, 'LevelUp!'],
-          ['signedDocuments', FileCheck2, 'Signed Documents'],
+          ['dashboard', LayoutDashboard, 'Home'],
           ...(currentMember?.scheduleEnabled ? ([['schedule', CalendarDays, 'Schedule β']] as Array<[View, LucideIcon, string]>) : []),
-          ['guides', BookOpen, 'Guides'],
-          ['benefits', HeartHandshake, 'Benefits'],
-          ['installs', Download, 'Installs'],
+          ['guides', BookOpen, 'Guide'],
+          ['levelup', Trophy, 'LevelUp!'],
+          ['profile', UserRound, 'Profile'],
         ];
 
   if (currentMember?.isAdmin && currentMember.status !== 'suspended') navItems.push(['admin', UsersRound, 'Admin']);
@@ -601,14 +599,14 @@ export default function App() {
   }
 
   return (
-    <main className="min-h-screen bg-mist text-ink">
+    <main className="min-h-screen bg-mist pb-24 text-ink lg:pb-0">
       {loginIntroName && (
         <div className="login-intro fixed inset-0 z-[60] grid place-items-center bg-mist">
           <h1 className="px-6 text-center text-4xl font-semibold text-ink md:text-6xl">Welcome back, {loginIntroName}</h1>
         </div>
       )}
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-4 lg:grid-cols-[250px_1fr] lg:px-6">
-        <aside className="workspace-sidebar rounded-xl border border-line bg-paper p-4 shadow-soft lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)]">
+        <aside className="workspace-sidebar hidden rounded-xl border border-line bg-paper p-4 shadow-soft lg:sticky lg:top-5 lg:block lg:h-[calc(100vh-2.5rem)]">
           <div className="flex items-center gap-3 border-b border-line pb-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-white">
               <img className="h-6 w-6" src={BRAND_ICON} alt="" />
@@ -694,6 +692,20 @@ export default function App() {
           )}
         </div>
       </div>
+      <nav className="fixed inset-x-3 bottom-3 z-40 grid grid-flow-col auto-cols-fr gap-1 rounded-[18px] border border-line bg-paper/95 p-2 shadow-soft backdrop-blur lg:hidden">
+        {navItems.map(([key, Icon, label]) => (
+          <button
+            key={key}
+            className={`grid min-h-[58px] place-items-center gap-1 rounded-2xl px-2 text-[11px] font-medium transition ${
+              view === key ? 'bg-forest text-white' : 'text-zinc-600'
+            }`}
+            onClick={() => setView(key)}
+          >
+            <Icon size={18} />
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
     </main>
   );
 }
@@ -1181,7 +1193,7 @@ function Schedule({
               <HeaderIcon size={24} />
             </span>
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Schedule β</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">SCHEDULE BETA</p>
               <h1 className={`mt-2 text-3xl font-semibold md:text-5xl ${isOverEstimated ? 'text-red-600' : isExactEstimated ? 'text-emerald-600' : 'text-ink'}`}>
                 Estimated hours: {actualHoursTotal}h / {estimatedHours || 0}h
               </h1>
@@ -1199,7 +1211,7 @@ function Schedule({
               const planned = plannedHours(dayShifts(dayIndex));
               const completion = dayCompletion(dayIndex);
               const status = completion ? getCompletionStatus(completion.actualHours, planned) : null;
-              const statusClass = status === 'completed' ? 'bg-emerald-500' : status === 'overworked' ? 'bg-orange-500' : status === 'day_off' ? 'bg-sky-500' : 'bg-ink';
+              const statusClass = status === 'completed' ? 'bg-emerald-500' : status === 'overworked' ? 'bg-orange-500' : status === 'day_off' ? 'bg-blue-500' : 'bg-ink';
               return (
                 <div key={day} className="border-l border-line p-2">
                   <div className="flex items-start justify-between gap-2">
@@ -1253,13 +1265,19 @@ function Schedule({
                   })}
                   <div className="sticky bottom-0 z-10 border-t border-line bg-paper/95 p-2 backdrop-blur">
                     {completion && (
-                      <p className={`mb-2 rounded-lg px-2 py-1 text-center text-xs font-semibold text-white ${status === 'completed' ? 'bg-emerald-500' : status === 'overworked' ? 'bg-orange-500' : 'bg-sky-500'}`}>
+                      <p className={`mb-2 rounded-lg px-2 py-1 text-center text-xs font-semibold text-white ${status === 'completed' ? 'bg-emerald-500' : status === 'overworked' ? 'bg-orange-500' : 'bg-blue-500'}`}>
                         {status === 'completed' ? 'Completed' : status === 'overworked' ? 'Overworked' : 'Day Off'}
                       </p>
                     )}
-                    <button className="h-9 w-full rounded-lg border border-line bg-white px-2 text-xs font-medium disabled:text-zinc-400" disabled={!canComplete(dayIndex)} onClick={() => setCompletingDayIndex(dayIndex)}>
-                      Complete Shift
-                    </button>
+                    {completion ? (
+                      <button className="mx-auto block text-xs font-semibold text-forest" onClick={() => setCompletingDayIndex(dayIndex)}>
+                        Edit
+                      </button>
+                    ) : (
+                      <button className="h-9 w-full rounded-lg border border-line bg-white px-2 text-xs font-medium disabled:text-zinc-400" disabled={!canComplete(dayIndex)} onClick={() => setCompletingDayIndex(dayIndex)}>
+                        Complete Shift
+                      </button>
+                    )}
                   </div>
                 </div>
               );

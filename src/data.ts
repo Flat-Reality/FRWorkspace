@@ -63,6 +63,8 @@ export const initialJumpLinks: JumpLink[] = [
   { id: 'jump-5', title: 'Update Profile', icon: 'UserRound', url: '#profile', order: 4, internalView: 'profile' },
   { id: 'jump-6', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 5 },
   { id: 'jump-7', title: 'Career Growth', icon: 'TrendingUp', url: '#career-growth', order: 6, internalView: 'careerGrowth' },
+  { id: 'jump-8', title: 'Signed Documents', icon: 'FileCheck2', url: '#signed-documents', order: 7, internalView: 'signedDocuments' },
+  { id: 'jump-9', title: 'Installs', icon: 'Download', url: '#installs', order: 8, internalView: 'installs' },
 ];
 
 export const initialGuidePages: GuidePage[] = [
