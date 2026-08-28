@@ -698,7 +698,7 @@ export default function App() {
           <button
             key={key}
             className={`grid min-h-[58px] place-items-center gap-1 rounded-[18px] px-2 text-[11px] font-medium transition ${
-              view === key ? 'bg-forest text-white' : 'text-zinc-600'
+              view === key ? 'text-forest' : 'text-zinc-600'
             }`}
             onClick={() => setView(key)}
           >
