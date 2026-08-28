@@ -58,14 +58,11 @@ export const initialRewards: Reward[] = [
 
 export const initialJumpLinks: JumpLink[] = [
   { id: 'jump-1', title: 'Social Benefits', icon: 'HeartHandshake', url: 'https://tally.so/r/EkYpQq', order: 1 },
-  { id: 'jump-2', title: 'Code of Conduct', icon: 'ShieldCheck', url: '#code-of-conduct', order: 2 },
-  { id: 'jump-4', title: 'Work Records', icon: 'ClipboardList', url: '#work-records', order: 3, internalView: 'workRecords' },
-  { id: 'jump-5', title: 'Update Profile', icon: 'UserRound', url: '#profile', order: 4, internalView: 'profile' },
-  { id: 'jump-6', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 5 },
-  { id: 'jump-7', title: 'Career Growth', icon: 'TrendingUp', url: '#career-growth', order: 6, internalView: 'careerGrowth' },
-  { id: 'jump-8', title: 'Signed Documents', icon: 'FileCheck2', url: '#signed-documents', order: 7, internalView: 'signedDocuments' },
-  { id: 'jump-9', title: 'Installs', icon: 'Download', url: '#installs', order: 8, internalView: 'installs' },
-  { id: 'jump-10', title: 'Theme', icon: 'Settings2', url: '#theme', order: 9 },
+  { id: 'jump-4', title: 'Work Records', icon: 'ClipboardList', url: '#work-records', order: 2, internalView: 'workRecords' },
+  { id: 'jump-6', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 3 },
+  { id: 'jump-7', title: 'Career Growth', icon: 'TrendingUp', url: '#career-growth', order: 4, internalView: 'careerGrowth' },
+  { id: 'jump-8', title: 'Signed Documents', icon: 'FileCheck2', url: '#signed-documents', order: 5, internalView: 'signedDocuments' },
+  { id: 'jump-9', title: 'Installs', icon: 'Download', url: '#installs', order: 6, internalView: 'installs' },
 ];
 
 export const initialGuidePages: GuidePage[] = [
