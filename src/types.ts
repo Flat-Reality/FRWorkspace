@@ -6,6 +6,18 @@ export type PartnerStatus = 'available' | 'working_hours' | 'inactive';
 export type WorkRecordType = 'standard' | 'positive' | 'strike' | 'negative' | 'explanation_request';
 export type ScheduleDayStatus = 'completed' | 'overworked' | 'day_off';
 
+export type AuditLogEntry = {
+  id: string;
+  eventType: string;
+  actorMemberId: string;
+  actorName: string;
+  targetMemberId?: string;
+  targetName?: string;
+  summary: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
+
 export type WorkRecord = {
   id: string;
   memberId: string;
@@ -69,6 +81,7 @@ export type WorkspaceMember = {
   xp: number;
   status: MemberStatus;
   statusUntil: string;
+  lastSeenAt: string;
   isAdmin: boolean;
   passwordHash: string;
   scheduleEnabled: boolean;

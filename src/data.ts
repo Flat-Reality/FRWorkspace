@@ -44,6 +44,7 @@ export const emptyMember: WorkspaceMember = {
   xp: 0,
   status: 'active',
   statusUntil: '',
+  lastSeenAt: '',
   isAdmin: false,
   passwordHash: '',
   scheduleEnabled: false,

@@ -1,6 +1,6 @@
 import { emptyMember, initialGuidePages, initialLevels, initialMembers, initialRewards, initialWorkRecords } from './data';
 import { supabase } from './supabase';
-import type { ScheduleDayCompletion, ScheduleShift, WorkspaceMember, WorkspaceState } from './types';
+import type { AuditLogEntry, ScheduleDayCompletion, ScheduleShift, WorkspaceMember, WorkspaceState } from './types';
 
 const STORAGE_KEY = 'flat-reality-workspace-state';
 
@@ -40,6 +40,7 @@ function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
     strikeSystem: Number(member.strikeSystem ?? 0),
     xp: Number(member.xp ?? 0),
     statusUntil: member.statusUntil ?? '',
+    lastSeenAt: member.lastSeenAt ?? '',
     passwordHash: member.passwordHash ?? '',
     scheduleEnabled: Boolean(member.scheduleEnabled),
   };
@@ -109,6 +110,11 @@ export async function resetWorkspacePassword(sessionToken: string, memberId: str
 export async function impersonateWorkspaceMember(sessionToken: string, memberId: string): Promise<{ session: WorkspaceSession; state: WorkspaceState }> {
   const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState> }>({ action: 'impersonate', sessionToken, memberId });
   return { session: response.session, state: normalizeWorkspaceState(response.state) };
+}
+
+export async function listWorkspaceAuditLogs(sessionToken: string, limit = 200): Promise<AuditLogEntry[]> {
+  const response = await callWorkspaceApi<{ logs: AuditLogEntry[] }>({ action: 'list_logs', sessionToken, limit });
+  return response.logs ?? [];
 }
 
 export async function loadWorkspaceState(sessionToken?: string): Promise<WorkspaceState> {

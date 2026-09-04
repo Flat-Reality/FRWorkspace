@@ -77,6 +77,9 @@ create table if not exists public.workspace_audit_log (
   created_at timestamptz not null default now()
 );
 
+create index if not exists workspace_audit_log_created_at_idx on public.workspace_audit_log(created_at desc);
+create index if not exists workspace_audit_log_actor_member_id_idx on public.workspace_audit_log(actor_member_id);
+
 alter table public.workspace_audit_log enable row level security;
 
 revoke all on table public.workspace_audit_log from anon;

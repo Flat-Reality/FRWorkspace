@@ -45,9 +45,10 @@ import {
 } from 'lucide-react';
 import { benefitProgramOptions, emptyMember, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, defaultWorkspaceState, impersonateWorkspaceMember, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, defaultWorkspaceState, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
+  AuditLogEntry,
   BenefitProgram,
   ContractType,
   GuidePage,
@@ -68,7 +69,7 @@ import type {
 } from './types';
 
 type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule';
-type AdminModule = 'home' | 'hr' | 'partners' | 'guides' | 'levelup' | 'supabase';
+type AdminModule = 'home' | 'hr' | 'partners' | 'guides' | 'levelup' | 'logs' | 'supabase';
 type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents' | 'schedule';
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
 
@@ -121,6 +122,22 @@ function formatDate(date: string) {
   if (!date) return '';
   const [year, month, day] = date.split('-');
   return `${day}/${month}/${year}`;
+}
+
+function formatDateTime(value: string) {
+  if (!value) return 'Never online';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Never online';
+  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function isOnline(member: WorkspaceMember) {
+  if (!member.lastSeenAt) return false;
+  return Date.now() - new Date(member.lastSeenAt).getTime() < 5 * 60 * 1000;
+}
+
+function presenceLabel(member: WorkspaceMember) {
+  return isOnline(member) ? 'Online now' : `Last online: ${formatDateTime(member.lastSeenAt)}`;
 }
 
 function displayName(member: WorkspaceMember) {
@@ -2083,12 +2100,14 @@ function Admin({
   if (module === 'partners') return <AdminPartners members={members} setMembers={setMembers} onBack={() => setModule('home')} />;
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
+  if (module === 'logs') return <AdminLogs members={members} onBack={() => setModule('home')} />;
 
   const modules: Array<[AdminModule, LucideIcon, string, string]> = [
     ['hr', UsersRound, 'HR', 'Users, contracts, documents, payments, statuses and work records.'],
     ['partners', Building2, 'Partners', 'Manage FR Partners availability, rates, index and profiles.'],
     ['guides', BookOpen, 'Guide Writting', 'Create and edit workspace guide pages.'],
     ['levelup', Trophy, 'LevelUp! Configurator', 'Configure levels, XP requirements and rewards.'],
+    ['logs', FileText, 'Logs', 'Review sessions, profile changes and workspace data edits.'],
     ['supabase', ExternalLink, 'Supabase Control', 'Open the connected Supabase project dashboard.'],
   ];
 
@@ -2243,6 +2262,7 @@ function PeopleGroup({ title, members, onSelect }: { title: string; members: Wor
               <VerifiedMark member={member} size="sm" />
             </p>
             <p className="mt-1 text-sm text-zinc-500">{member.employmentId} - {member.jobRole || 'No role set'}</p>
+            <p className={`mt-2 text-xs font-medium ${isOnline(member) ? 'text-emerald-600' : 'text-zinc-500'}`}>{presenceLabel(member)}</p>
             <p className="mt-3 text-xs font-medium text-zinc-500">{statusLabel(member.status)} · {member.strikeSystem} strikes</p>
           </button>
         ))}
@@ -2746,6 +2766,73 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
           </tbody>
         </table>
         {!partnerMembers.length && <p className="p-4 text-sm text-zinc-500">No FR Partners connected yet.</p>}
+      </section>
+    </div>
+  );
+}
+
+function AdminLogs({ members, onBack }: { members: WorkspaceMember[]; onBack: () => void }) {
+  const [logs, setLogs] = useState<AuditLogEntry[]>([]);
+  const [status, setStatus] = useState('Loading logs...');
+
+  async function refreshLogs() {
+    const token = getStoredSession()?.token;
+    if (!token || !isSupabaseConfigured) {
+      setLogs([]);
+      setStatus('Logs are available after signing in with the live database.');
+      return;
+    }
+
+    try {
+      const nextLogs = await listWorkspaceAuditLogs(token, 200);
+      setLogs(nextLogs);
+      setStatus(`${nextLogs.length} latest events loaded. Events older than 90 days are removed automatically.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not load logs.');
+    }
+  }
+
+  useEffect(() => {
+    void refreshLogs();
+  }, []);
+
+  function memberName(memberId?: string) {
+    if (!memberId) return 'System';
+    const member = members.find((item) => item.id === memberId);
+    return member ? displayName(member) : memberId;
+  }
+
+  return (
+    <div className="grid gap-5">
+      <BackButton onBack={onBack} />
+      <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Logs</p>
+            <h1 className="mt-3 text-3xl font-semibold">Audit Console</h1>
+            <p className="mt-2 text-sm text-zinc-600">{status}</p>
+          </div>
+          <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-3 text-sm font-medium text-white" onClick={() => void refreshLogs()}>
+            <RotateCcw size={16} />
+            Refresh
+          </button>
+        </div>
+      </section>
+      <section className="overflow-hidden rounded-xl border border-line bg-zinc-950 p-4 font-mono text-sm text-zinc-100 shadow-soft">
+        <div className="grid max-h-[620px] gap-1 overflow-auto">
+          {logs.map((log) => (
+            <div key={log.id} className="grid gap-1 border-b border-white/10 py-3 last:border-0">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="text-zinc-400">[{formatDateTime(log.createdAt)}]</span>
+                <span className="text-fuchsia-300">{log.eventType}</span>
+                <span className="text-zinc-300">actor={log.actorName || memberName(log.actorMemberId)}</span>
+                {log.targetName && <span className="text-zinc-300">target={log.targetName}</span>}
+              </div>
+              <p className="whitespace-pre-wrap text-zinc-100">{log.summary}</p>
+            </div>
+          ))}
+          {!logs.length && <p className="py-6 text-zinc-400">No audit events recorded yet.</p>}
+        </div>
       </section>
     </div>
   );
