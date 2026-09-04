@@ -142,6 +142,14 @@ function isFrPartnersConnected(member: WorkspaceMember) {
   return member.benefitPrograms.includes('FR Partners');
 }
 
+function VerifiedMark({ member, size = 'md' }: { member: WorkspaceMember; size?: 'sm' | 'md' }) {
+  return (
+    <span className={`inline-flex shrink-0 items-center justify-center rounded-full text-white ${isIndependentPartner(member) ? 'bg-amber-400' : 'bg-forest'} ${size === 'sm' ? 'h-4 w-4' : 'h-5 w-5'}`}>
+      <Check size={size === 'sm' ? 11 : 13} strokeWidth={3} />
+    </span>
+  );
+}
+
 function getCurrentLevel(levels: Level[], xp: number) {
   return [...levels].sort((a, b) => b.xpRequired - a.xpRequired).find((level) => xp >= level.xpRequired) ?? levels[0];
 }
@@ -158,12 +166,52 @@ function formatEuroAmount(amount: number | undefined) {
   return `${Number(amount ?? 0).toFixed(2)}€`;
 }
 
-async function hashPassword(password: string) {
+function bytesToBase64(bytes: Uint8Array) {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function base64ToBytes(value: string) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function timingSafeEqual(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    diff |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  }
+  return diff === 0;
+}
+
+async function legacySha256(password: string) {
   const bytes = new TextEncoder().encode(password);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
+}
+
+async function hashPassword(password: string) {
+  const iterations = 210000;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
+  return `pbkdf2$${iterations}$${bytesToBase64(salt)}$${bytesToBase64(new Uint8Array(bits))}`;
+}
+
+async function verifyPassword(password: string, storedHash: string) {
+  if (storedHash.startsWith('pbkdf2$')) {
+    const [, iterationsValue, saltValue, hashValue] = storedHash.split('$');
+    const iterations = Number(iterationsValue);
+    if (!iterations || !saltValue || !hashValue) return { ok: false, needsUpgrade: false };
+    const salt = base64ToBytes(saltValue);
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
+    return { ok: timingSafeEqual(bytesToBase64(new Uint8Array(bits)), hashValue), needsUpgrade: false };
+  }
+
+  return { ok: timingSafeEqual(await legacySha256(password), storedHash), needsUpgrade: true };
 }
 
 function getStoredSession() {
@@ -545,13 +593,14 @@ export default function App() {
       setLoginError('Password is not set. Use recovery options to create one.');
       return;
     }
-    const passwordHash = await hashPassword(password);
-    if (passwordHash !== member.passwordHash) {
+    const passwordCheck = await verifyPassword(password, member.passwordHash);
+    if (!passwordCheck.ok) {
       setLoginError('Employment ID or password is incorrect.');
       return;
     }
-    if (rawMember && rawMember.status !== member.status) {
-      updateMembers(members.map((item) => (item.id === member.id ? member : item)));
+    if (rawMember && (rawMember.status !== member.status || passwordCheck.needsUpgrade)) {
+      const upgradedMember = passwordCheck.needsUpgrade ? { ...member, passwordHash: await hashPassword(password) } : member;
+      updateMembers(members.map((item) => (item.id === member.id ? upgradedMember : item)));
     }
     setCurrentMemberId(member.id);
     saveSession(member.id);
@@ -677,7 +726,10 @@ export default function App() {
           </nav>
 
           <div className="mt-6 rounded-lg border border-line bg-mist p-3">
-            <p className="text-sm font-medium">{displayName(currentMember)}</p>
+            <p className="inline-flex items-center gap-2 text-sm font-medium">
+              {displayName(currentMember)}
+              <VerifiedMark member={currentMember} size="sm" />
+            </p>
             <p className="mt-1 text-xs text-zinc-500">{currentMember.employmentId} · {formatEuroAmount(currentMember.withheldBalance)}</p>
             <p className="mt-3 text-xs text-zinc-500">{saveStatus}</p>
           </div>
@@ -772,8 +824,8 @@ function RecoveryWizard({ members, updateMembers, onClose }: { members: Workspac
   }
 
   async function saveNewPassword() {
-    if (newPassword.length < 6) {
-      setError('Password must contain at least 6 characters.');
+    if (newPassword.length < 10) {
+      setError('Password must contain at least 10 characters.');
       return;
     }
     const passwordHash = await hashPassword(newPassword);
@@ -1059,7 +1111,7 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
           <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Profile</p>
           <h1 className="mt-3 inline-flex items-center gap-2 text-3xl font-semibold">
             {displayName(member)}
-            <BadgeCheck className={isIndependentPartner(member) ? 'text-amber-400' : 'text-forest'} size={24} />
+            <VerifiedMark member={member} />
           </h1>
         </div>
         <div className="grid gap-2 lg:hidden">
@@ -1117,10 +1169,21 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
 
       <Section title="Additional Information">
         <div className="rounded-xl border border-line bg-mist p-4">
-          <p className="leading-7 text-zinc-600">To update additional information, contact your manager.</p>
-          <a className="mt-4 inline-flex h-11 items-center justify-center rounded-lg bg-forest px-4 text-sm font-medium text-white" href="https://join.slack.com/t/flatrealityeu/shared_invite/zt-3eeknccsz-MWbN2vlNbRNwu3blGs11kw" target="_blank" rel="noreferrer">
-            Open Slack
-          </a>
+          {upworkMode ? (
+            <>
+              <p className="leading-7 text-zinc-600">Contact your Account Manager via Upwork.</p>
+              <a className="mt-4 inline-flex h-11 items-center justify-center rounded-lg bg-forest px-4 text-sm font-medium text-white" href="https://www.upwork.com" target="_blank" rel="noreferrer">
+                Open Upwork
+              </a>
+            </>
+          ) : (
+            <>
+              <p className="leading-7 text-zinc-600">To update additional information, contact your manager.</p>
+              <a className="mt-4 inline-flex h-11 items-center justify-center rounded-lg bg-forest px-4 text-sm font-medium text-white" href="https://join.slack.com/t/flatrealityeu/shared_invite/zt-3eeknccsz-MWbN2vlNbRNwu3blGs11kw" target="_blank" rel="noreferrer">
+                Open Slack
+              </a>
+            </>
+          )}
         </div>
       </Section>
     </div>
@@ -1160,9 +1223,11 @@ function VerificationCard({ member }: { member: WorkspaceMember }) {
             ))}
           </ul>
         </div>
-        <button className="justify-self-start rounded-lg bg-white/15 px-4 py-2 text-sm font-semibold text-white/60" type="button" disabled>
-          Download Badge
-        </button>
+        {isPartner && (
+          <button className="justify-self-start rounded-lg bg-white/15 px-4 py-2 text-sm font-semibold text-white/60" type="button" disabled>
+            Download Badge
+          </button>
+        )}
       </div>
     </section>
   );
@@ -2080,7 +2145,7 @@ function PeopleGroup({ title, members, onSelect }: { title: string; members: Wor
           <button key={member.id} className="rounded-xl border border-line bg-paper p-4 text-left shadow-soft transition hover:-translate-y-0.5" onClick={() => onSelect(member.id)}>
             <p className="inline-flex items-center gap-2 font-semibold">
               {displayName(member)}
-              <BadgeCheck className={isIndependentPartner(member) ? 'text-amber-400' : 'text-forest'} size={17} />
+              <VerifiedMark member={member} size="sm" />
             </p>
             <p className="mt-1 text-sm text-zinc-500">{member.employmentId} - {member.jobRole || 'No role set'}</p>
             <p className="mt-3 text-xs font-medium text-zinc-500">{statusLabel(member.status)} · {member.strikeSystem} strikes</p>
@@ -2468,6 +2533,45 @@ const partnerStatusOptions: Array<{ value: PartnerStatus; label: string; icon: L
   { value: 'inactive', label: 'Inactive', icon: CircleOff, className: 'text-zinc-500' },
 ];
 
+function PartnerStatusPicker({ member, onChange }: { member: WorkspaceMember; onChange: (status: PartnerStatus) => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const status = partnerStatusOptions.find((option) => option.value === member.partnerStatus) ?? partnerStatusOptions[0];
+  const StatusIcon = status.icon;
+
+  return (
+    <div className="relative">
+      <button className="flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-line bg-white px-3 text-left text-sm font-medium" type="button" onClick={() => setIsOpen((value) => !value)}>
+        <span className="flex items-center gap-2">
+          <StatusIcon size={16} className={status.className} />
+          {status.label}
+        </span>
+        <span className="text-xs text-zinc-400">⌄</span>
+      </button>
+      {isOpen && (
+        <div className="absolute left-0 top-11 z-20 grid w-48 gap-1 rounded-lg border border-line bg-paper p-1 shadow-soft">
+          {partnerStatusOptions.map((option) => {
+            const Icon = option.icon;
+            return (
+              <button
+                key={option.value}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium hover:bg-mist"
+                type="button"
+                onClick={() => {
+                  onChange(option.value);
+                  setIsOpen(false);
+                }}
+              >
+                <Icon size={16} className={option.className} />
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMember[]; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; onBack: () => void }) {
   const partnerMembers = members.filter((member) => isFrPartnersConnected(member) && member.status !== 'suspended');
 
@@ -2490,13 +2594,14 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
         <h1 className="mt-3 text-3xl font-semibold">FR Partners Board</h1>
       </section>
       <section className="overflow-x-auto rounded-xl border border-line bg-paper p-4 shadow-soft">
-        <table className="w-full min-w-[1180px] border-collapse text-sm">
+        <table className="w-full min-w-[1280px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-line text-left text-zinc-500">
               <th className="px-3 py-3">Name</th>
               <th className="px-3 py-3">Status</th>
               <th className="px-3 py-3">Role</th>
               <th className="px-3 py-3">Seniority</th>
+              <th className="px-3 py-3">Time Zone</th>
               <th className="px-3 py-3">Rate</th>
               <th className="px-3 py-3">Index</th>
               <th className="px-3 py-3">Completed Tasks</th>
@@ -2507,28 +2612,20 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
           </thead>
           <tbody>
             {partnerMembers.map((member) => {
-              const status = partnerStatusOptions.find((option) => option.value === member.partnerStatus) ?? partnerStatusOptions[0];
-              const StatusIcon = status.icon;
               return (
                 <tr key={member.id} className="border-b border-line align-middle">
                   <td className="px-3 py-3 font-medium">
                     <span className="inline-flex items-center gap-2">
                       {displayName(member)}
-                      <BadgeCheck className={isIndependentPartner(member) ? 'text-amber-400' : 'text-forest'} size={16} />
+                      <VerifiedMark member={member} size="sm" />
                     </span>
                   </td>
                   <td className="px-3 py-3">
-                    <label className="flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-2">
-                      <StatusIcon size={16} className={status.className} />
-                      <select className="w-full bg-transparent text-sm outline-none" value={member.partnerStatus} onChange={(event) => updatePartnerStatus(member, event.target.value as PartnerStatus)}>
-                        {partnerStatusOptions.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </label>
+                    <PartnerStatusPicker member={member} onChange={(status) => updatePartnerStatus(member, status)} />
                   </td>
                   <td className="px-3 py-3">{member.jobRole || 'No role set'}</td>
                   <td className="px-3 py-3">{member.seniority || 'Not set'}</td>
+                  <td className="px-3 py-3">{member.timeZone || 'Not set'}</td>
                   <td className="px-3 py-3">
                     <input className="h-10 w-28 rounded-lg border border-line bg-white px-2 text-sm outline-none" value={member.rate} onChange={(event) => updatePartner(member.id, { rate: event.target.value })} />
                   </td>
