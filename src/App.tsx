@@ -12,6 +12,8 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  CircleOff,
+  Clock,
   ClipboardList,
   Download,
   ExternalLink,
@@ -39,6 +41,7 @@ import {
   UserRound,
   UsersRound,
   WalletCards,
+  Zap,
 } from 'lucide-react';
 import { benefitProgramOptions, emptyMember, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { isSupabaseConfigured } from './supabase';
@@ -52,6 +55,7 @@ import type {
   MemberDocument,
   MemberStatus,
   OnboardingContractType,
+  PartnerStatus,
   Reward,
   ScheduleDayCompletion,
   ScheduleDayStatus,
@@ -63,7 +67,7 @@ import type {
 } from './types';
 
 type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule';
-type AdminModule = 'home' | 'hr' | 'guides' | 'levelup' | 'supabase';
+type AdminModule = 'home' | 'hr' | 'partners' | 'guides' | 'levelup' | 'supabase';
 type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents' | 'schedule';
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
 
@@ -120,6 +124,22 @@ function formatDate(date: string) {
 
 function displayName(member: WorkspaceMember) {
   return member.preferredName.trim() || member.fullName || member.employmentId;
+}
+
+function isIndependentPartner(member: WorkspaceMember) {
+  return member.contractType === 'INDEPENDENT PARTNER';
+}
+
+function isCoreTeam(member: WorkspaceMember) {
+  return member.contractType === 'CORE TEAM';
+}
+
+function isUpworkContract(member: WorkspaceMember) {
+  return member.onboarding.contractType === 'UPWORK CONTRACT';
+}
+
+function isFrPartnersConnected(member: WorkspaceMember) {
+  return member.benefitPrograms.includes('FR Partners');
 }
 
 function getCurrentLevel(levels: Level[], xp: number) {
@@ -379,6 +399,24 @@ function SelectField<T extends string>({
   );
 }
 
+function AccountTypeRadios({ value, onChange }: { value: ContractType; onChange: (value: ContractType) => void }) {
+  const options: ContractType[] = ['CORE TEAM', 'INDEPENDENT PARTNER'];
+
+  return (
+    <fieldset className="grid gap-2">
+      <legend className="text-sm font-medium text-zinc-600">Account Type</legend>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {options.map((option) => (
+          <label key={option} className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border px-3 text-sm font-medium ${value === option ? 'border-forest bg-forest/10 text-forest' : 'border-line bg-white text-zinc-600'}`}>
+            <input type="radio" name="accountType" checked={value === option} onChange={() => onChange(option)} />
+            {option}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="grid gap-4">
@@ -535,6 +573,11 @@ export default function App() {
     setView('dashboard');
   }
 
+  function signOut() {
+    clearSession();
+    setCurrentMemberId(null);
+  }
+
   if (!currentMember) {
     return (
       <main className="min-h-screen bg-mist px-5 py-8 text-ink">
@@ -639,7 +682,7 @@ export default function App() {
             <p className="mt-3 text-xs text-zinc-500">{saveStatus}</p>
           </div>
 
-          <button className="mt-4 flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-zinc-600 hover:bg-mist" onClick={() => { clearSession(); setCurrentMemberId(null); }}>
+          <button className="mt-4 flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-zinc-600 hover:bg-mist" onClick={signOut}>
             <LogOut size={17} />
             Sign out
           </button>
@@ -658,7 +701,7 @@ export default function App() {
               setView={setView}
             />
           )}
-          {view === 'profile' && <Profile member={currentMember} updateCurrentMember={updateCurrentMember} />}
+          {view === 'profile' && <Profile member={currentMember} updateCurrentMember={updateCurrentMember} onLogout={signOut} />}
           {view === 'levelup' && <LevelUp member={currentMember} levels={levels} rewards={rewards} />}
           {view === 'careerGrowth' && <CareerGrowth member={currentMember} />}
           {view === 'schedule' && currentMember.scheduleEnabled && (
@@ -831,7 +874,12 @@ function Dashboard({
     { ...(jumpLinks.find((link) => link.title === 'Contact Head Office') ?? { id: 'jump-contact-head-office', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 2 }), order: 2 },
     { ...(jumpLinks.find((link) => link.internalView === 'workRecords') ?? { id: 'jump-work-records', title: 'Work Records', icon: 'ClipboardList', url: '#work-records', order: 3, internalView: 'workRecords' }), order: 3 },
   ];
-  const visibleJumpLinks = isSuspended ? suspendedJumpLinks : jumpLinks;
+  const baseJumpLinks = isSuspended ? suspendedJumpLinks : jumpLinks;
+  const visibleJumpLinks = baseJumpLinks.filter((link) => {
+    if (isIndependentPartner(member) && link.title === 'Social Benefits') return false;
+    if (isUpworkContract(member) && link.title === 'Contact Head Office') return false;
+    return true;
+  });
   const inactiveStatus = member.status !== 'active' && member.status !== 'suspended'
     ? {
         sick_leave: {
@@ -999,12 +1047,30 @@ function Dashboard({
   );
 }
 
-function Profile({ member, updateCurrentMember }: { member: WorkspaceMember; updateCurrentMember: (changes: Partial<WorkspaceMember>) => void }) {
+function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceMember; updateCurrentMember: (changes: Partial<WorkspaceMember>) => void; onLogout: () => void }) {
+  const upworkMode = isUpworkContract(member);
+
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Profile</p>
-        <h1 className="mt-3 text-3xl font-semibold">{displayName(member)}</h1>
+      <VerificationCard member={member} />
+
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Profile</p>
+          <h1 className="mt-3 inline-flex items-center gap-2 text-3xl font-semibold">
+            {displayName(member)}
+            <BadgeCheck className={isIndependentPartner(member) ? 'text-amber-400' : 'text-forest'} size={24} />
+          </h1>
+        </div>
+        <div className="grid gap-2 lg:hidden">
+          <button className="h-11 rounded-lg bg-forest px-4 text-sm font-semibold text-white" type="button">
+            Update Profile
+          </button>
+          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-zinc-700" type="button" onClick={onLogout}>
+            <LogOut size={17} />
+            Log Out
+          </button>
+        </div>
       </div>
 
       <Section title="Workspace Information">
@@ -1013,14 +1079,18 @@ function Profile({ member, updateCurrentMember }: { member: WorkspaceMember; upd
           <Field label="Full Name" value={member.fullName} disabled onChange={() => undefined} />
           <Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateCurrentMember({ preferredName: value })} />
           <Field label="Work Start Date" value={member.workStartDate} disabled onChange={() => undefined} />
-          <Field label="Contract Type" value={member.contractType} disabled onChange={() => undefined} />
+          <Field label="Account Type" value={member.contractType} disabled onChange={() => undefined} />
+          <Field label="Contracts" value={member.onboarding.contractType} disabled onChange={() => undefined} />
           <Field label="Job Role" value={member.jobRole} disabled onChange={() => undefined} />
           {member.contractType === 'CORE TEAM' && <Field label="Work Email" value={member.workEmail} disabled onChange={() => undefined} />}
           <Field label="Personal Email" value={member.personalEmail} disabled onChange={() => undefined} />
           <Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateCurrentMember({ phoneNumber: value })} />
           <Field label="Time Zone" value={member.timeZone} onChange={(value) => updateCurrentMember({ timeZone: value })} />
           <Field label="Portfolio" value={member.portfolio} onChange={(value) => updateCurrentMember({ portfolio: value })} />
+          {isFrPartnersConnected(member) && <Field label="Upwork Profile" value={member.upworkUrl} onChange={(value) => updateCurrentMember({ upworkUrl: value })} />}
+          <Field label="Connected Workflows" value={member.benefitPrograms.join(', ') || 'None'} disabled onChange={() => undefined} />
           <Field label="Estimated Hours" value={member.estimatedHours} disabled onChange={() => undefined} />
+          <Field label="Rate" value={member.rate} disabled onChange={() => undefined} />
           <Field label="Withheld Balance (€)" value={Number(member.withheldBalance ?? 0).toFixed(2)} disabled onChange={() => undefined} />
         </div>
       </Section>
@@ -1035,9 +1105,12 @@ function Profile({ member, updateCurrentMember }: { member: WorkspaceMember; upd
 
       <Section title="Payment Information">
         <div className="rounded-xl border border-line bg-mist p-4">
-          <p className="leading-7 text-zinc-600">To update payout information, edit your profile through the Supplier portal.</p>
-          <a className="mt-4 inline-flex h-11 items-center justify-center rounded-lg bg-ink px-4 text-sm font-medium text-white" href="https://forms.office.com/r/maSdSX94Ui" target="_blank" rel="noreferrer">
-            Open Supplier Form
+          {upworkMode && <img className="mb-4 h-8 w-auto" src="/resources/logos/upworklogo.webp" alt="Upwork" />}
+          <p className="leading-7 text-zinc-600">
+            {upworkMode ? 'To update payout information, edit your Upwork disbursement methods.' : 'To update payout information, edit your profile through the Supplier portal.'}
+          </p>
+          <a className="mt-4 inline-flex h-11 items-center justify-center rounded-lg bg-ink px-4 text-sm font-medium text-white" href={upworkMode ? 'https://www.upwork.com/nx/payments/disbursement-methods' : 'https://forms.office.com/r/maSdSX94Ui'} target="_blank" rel="noreferrer">
+            {upworkMode ? 'Open Upwork Payments' : 'Open Supplier Form'}
           </a>
         </div>
       </Section>
@@ -1051,6 +1124,47 @@ function Profile({ member, updateCurrentMember }: { member: WorkspaceMember; upd
         </div>
       </Section>
     </div>
+  );
+}
+
+function VerificationCard({ member }: { member: WorkspaceMember }) {
+  const isPartner = isIndependentPartner(member);
+  const title = isPartner ? 'Vetted Network Verified Partner' : 'Core Team Verified Member';
+  const video = isPartner ? '/resources/videos/yellowgradient.mp4' : '/resources/videos/purplegradient.mp4';
+  const items = isPartner
+    ? ['Access to Flat Reality and partner projects', 'Vetted Network Partner badge', 'Access to LevelUp! and other Flat Reality partner programs']
+    : ['Flat Reality social programs', 'Additional protection', 'Association with Flat Reality'];
+
+  return (
+    <section className="relative overflow-hidden rounded-xl p-6 text-white shadow-soft">
+      <video className="absolute inset-0 h-full w-full object-cover" src={video} autoPlay muted loop playsInline />
+      <div className="absolute inset-0 bg-black/45" />
+      <div className="relative grid gap-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/15 text-white backdrop-blur">
+            <BadgeCheck size={23} />
+          </span>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/75">Verified Access</p>
+            <h2 className="mt-1 text-2xl font-semibold">{title}</h2>
+          </div>
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-white/85">You have access to:</p>
+          <ul className="mt-2 grid gap-2 text-sm text-white/85">
+            {items.map((item) => (
+              <li key={item} className="flex gap-2">
+                <Check size={16} className="mt-0.5 shrink-0" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <button className="justify-self-start rounded-lg bg-white/15 px-4 py-2 text-sm font-semibold text-white/60" type="button" disabled>
+          Download Badge
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1809,11 +1923,13 @@ function Admin({
   const [module, setModule] = useState<AdminModule>('home');
 
   if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} impersonateMember={impersonateMember} onBack={() => setModule('home')} />;
+  if (module === 'partners') return <AdminPartners members={members} setMembers={setMembers} onBack={() => setModule('home')} />;
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
 
   const modules: Array<[AdminModule, LucideIcon, string, string]> = [
     ['hr', UsersRound, 'HR', 'Users, contracts, documents, payments, statuses and work records.'],
+    ['partners', Building2, 'Partners', 'Manage FR Partners availability, rates, index and profiles.'],
     ['guides', BookOpen, 'Guide Writting', 'Create and edit workspace guide pages.'],
     ['levelup', Trophy, 'LevelUp! Configurator', 'Configure levels, XP requirements and rewards.'],
     ['supabase', ExternalLink, 'Supabase Control', 'Open the connected Supabase project dashboard.'],
@@ -1929,7 +2045,7 @@ function HrAdmin({
             </label>
           </section>
           <PeopleGroup title="Core Team" members={visibleMembers.filter((member) => member.contractType === 'CORE TEAM')} onSelect={setSelectedMemberId} />
-          <PeopleGroup title="Independent Contractors" members={visibleMembers.filter((member) => member.contractType === 'INDEPENDENT PARTNER')} onSelect={setSelectedMemberId} />
+          <PeopleGroup title="Independent Partners" members={visibleMembers.filter((member) => member.contractType === 'INDEPENDENT PARTNER')} onSelect={setSelectedMemberId} />
           <section className="grid gap-3">
             <button className="justify-self-start text-sm font-medium text-forest" onClick={() => setShowSuspendedUsers((value) => !value)}>
               {showSuspendedUsers ? 'Hide suspended users' : 'Show suspended users'}
@@ -1962,7 +2078,10 @@ function PeopleGroup({ title, members, onSelect }: { title: string; members: Wor
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {members.map((member) => (
           <button key={member.id} className="rounded-xl border border-line bg-paper p-4 text-left shadow-soft transition hover:-translate-y-0.5" onClick={() => onSelect(member.id)}>
-            <p className="font-semibold">{displayName(member)}</p>
+            <p className="inline-flex items-center gap-2 font-semibold">
+              {displayName(member)}
+              <BadgeCheck className={isIndependentPartner(member) ? 'text-amber-400' : 'text-forest'} size={17} />
+            </p>
             <p className="mt-1 text-sm text-zinc-500">{member.employmentId} - {member.jobRole || 'No role set'}</p>
             <p className="mt-3 text-xs font-medium text-zinc-500">{statusLabel(member.status)} · {member.strikeSystem} strikes</p>
           </button>
@@ -2043,7 +2162,7 @@ function AdminProfileTab({ member, updateMember, setMembers, impersonateMember }
           <Field label="Full Name" value={member.fullName} onChange={(value) => updateMember({ fullName: value })} />
           <Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateMember({ preferredName: value })} />
           <Field label="Work Start Date" type="date" value={member.workStartDate} onChange={(value) => updateMember({ workStartDate: value })} />
-          <SelectField<ContractType> label="Contract Type" value={member.contractType} options={['CORE TEAM', 'INDEPENDENT PARTNER']} onChange={(value) => updateMember({ contractType: value, workEmail: value === 'CORE TEAM' ? member.workEmail : '' })} />
+          <AccountTypeRadios value={member.contractType} onChange={(value) => updateMember({ contractType: value, workEmail: value === 'CORE TEAM' ? member.workEmail : '' })} />
           <Field label="Address of Residence" value={member.addressOfResidence} onChange={(value) => updateMember({ addressOfResidence: value })} />
           <Field label="Citizenship Country" value={member.citizenshipCountry} onChange={(value) => updateMember({ citizenshipCountry: value })} />
           <Field label="Personal Email" value={member.personalEmail} onChange={(value) => updateMember({ personalEmail: value })} />
@@ -2053,6 +2172,8 @@ function AdminProfileTab({ member, updateMember, setMembers, impersonateMember }
           <Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateMember({ phoneNumber: value })} />
           <Field label="Time Zone" value={member.timeZone} onChange={(value) => updateMember({ timeZone: value })} />
           <Field label="Portfolio" value={member.portfolio} onChange={(value) => updateMember({ portfolio: value })} />
+          {isFrPartnersConnected(member) && <Field label="Upwork Profile" value={member.upworkUrl} onChange={(value) => updateMember({ upworkUrl: value })} />}
+          <Field label="Rate" value={member.rate} onChange={(value) => updateMember({ rate: value })} />
           <Field label="Languages" value={member.languages} onChange={(value) => updateMember({ languages: value })} />
           <Field label="Software" value={member.software} onChange={(value) => updateMember({ software: value })} />
           <Field label="Seniority" value={member.seniority} onChange={(value) => updateMember({ seniority: value })} />
@@ -2252,7 +2373,7 @@ function AdminPaymentsTab({ member, updateMember }: { member: WorkspaceMember; u
         <Field label="IBAN" value={member.iban} onChange={(value) => updateMember({ iban: value })} />
         <Field label="Withheld Balance (€)" type="number" value={member.withheldBalance} onChange={(value) => updateMember({ withheldBalance: Number(value) })} />
       </div>
-      <Section title="Benefit Program">
+      <Section title="Connected Workflows">
         <div className="flex flex-wrap gap-2">
           {benefitProgramOptions.map((program) => (
             <button key={program} className={`rounded-lg border px-3 py-2 text-sm font-medium ${member.benefitPrograms.includes(program) ? 'border-forest bg-forest text-white' : 'border-line bg-white text-zinc-600'}`} onClick={() => toggleBenefit(program)}>
@@ -2308,7 +2429,7 @@ function AdminDocumentsTab({ member, updateMember }: { member: WorkspaceMember; 
             <input type="checkbox" checked={member.onboarding.completed} onChange={(event) => completeOnboarding(event.target.checked)} />
             Onboarding Completed (+100 XP once)
           </label>
-          <SelectField<OnboardingContractType> label="Contract" value={member.onboarding.contractType} options={['None', 'MASTER SERVICE AGREEMENT']} onChange={(value) => updateMember({ onboarding: { ...member.onboarding, contractType: value } })} />
+          <SelectField<OnboardingContractType> label="Contracts" value={member.onboarding.contractType} options={['None', 'MASTER SERVICE AGREEMENT', 'UPWORK CONTRACT']} onChange={(value) => updateMember({ onboarding: { ...member.onboarding, contractType: value } })} />
         </div>
       </Section>
       <Section title="Other Documents">
@@ -2337,6 +2458,101 @@ function DocumentCheck({ title, checked, url, onChange }: { title: string; check
         {title}
       </label>
       {checked && <input className="h-10 rounded-lg border border-line px-3 text-sm" value={url} placeholder="Document URL" onChange={(event) => onChange(checked, event.target.value)} />}
+    </div>
+  );
+}
+
+const partnerStatusOptions: Array<{ value: PartnerStatus; label: string; icon: LucideIcon; className: string }> = [
+  { value: 'available', label: 'Available', icon: Zap, className: 'text-emerald-700' },
+  { value: 'working_hours', label: 'Working Hours', icon: Clock, className: 'text-amber-600' },
+  { value: 'inactive', label: 'Inactive', icon: CircleOff, className: 'text-zinc-500' },
+];
+
+function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMember[]; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; onBack: () => void }) {
+  const partnerMembers = members.filter((member) => isFrPartnersConnected(member) && member.status !== 'suspended');
+
+  function updatePartner(memberId: string, changes: Partial<WorkspaceMember>) {
+    setMembers((items) => items.map((member) => (member.id === memberId ? { ...member, ...changes } : member)));
+  }
+
+  function updatePartnerStatus(member: WorkspaceMember, status: PartnerStatus) {
+    updatePartner(member.id, {
+      partnerStatus: status,
+      completedTasks: status === 'working_hours' && member.partnerStatus !== 'working_hours' ? member.completedTasks + 1 : member.completedTasks,
+    });
+  }
+
+  return (
+    <div className="grid gap-5">
+      <BackButton onBack={onBack} />
+      <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
+        <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Partners</p>
+        <h1 className="mt-3 text-3xl font-semibold">FR Partners Board</h1>
+      </section>
+      <section className="overflow-x-auto rounded-xl border border-line bg-paper p-4 shadow-soft">
+        <table className="w-full min-w-[1180px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-zinc-500">
+              <th className="px-3 py-3">Name</th>
+              <th className="px-3 py-3">Status</th>
+              <th className="px-3 py-3">Role</th>
+              <th className="px-3 py-3">Seniority</th>
+              <th className="px-3 py-3">Rate</th>
+              <th className="px-3 py-3">Index</th>
+              <th className="px-3 py-3">Completed Tasks</th>
+              <th className="px-3 py-3">Strikes</th>
+              <th className="px-3 py-3">Upwork</th>
+              <th className="px-3 py-3">Portfolio</th>
+            </tr>
+          </thead>
+          <tbody>
+            {partnerMembers.map((member) => {
+              const status = partnerStatusOptions.find((option) => option.value === member.partnerStatus) ?? partnerStatusOptions[0];
+              const StatusIcon = status.icon;
+              return (
+                <tr key={member.id} className="border-b border-line align-middle">
+                  <td className="px-3 py-3 font-medium">
+                    <span className="inline-flex items-center gap-2">
+                      {displayName(member)}
+                      <BadgeCheck className={isIndependentPartner(member) ? 'text-amber-400' : 'text-forest'} size={16} />
+                    </span>
+                  </td>
+                  <td className="px-3 py-3">
+                    <label className="flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-2">
+                      <StatusIcon size={16} className={status.className} />
+                      <select className="w-full bg-transparent text-sm outline-none" value={member.partnerStatus} onChange={(event) => updatePartnerStatus(member, event.target.value as PartnerStatus)}>
+                        {partnerStatusOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </td>
+                  <td className="px-3 py-3">{member.jobRole || 'No role set'}</td>
+                  <td className="px-3 py-3">{member.seniority || 'Not set'}</td>
+                  <td className="px-3 py-3">
+                    <input className="h-10 w-28 rounded-lg border border-line bg-white px-2 text-sm outline-none" value={member.rate} onChange={(event) => updatePartner(member.id, { rate: event.target.value })} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <input className="h-10 w-20 rounded-lg border border-line bg-white px-2 text-sm outline-none" type="number" value={member.partnerIndex} onChange={(event) => updatePartner(member.id, { partnerIndex: Number(event.target.value) })} />
+                    <span className="ml-1 text-zinc-500">%</span>
+                  </td>
+                  <td className="px-3 py-3">
+                    <input className="h-10 w-20 rounded-lg border border-line bg-white px-2 text-sm outline-none" type="number" value={member.completedTasks} onChange={(event) => updatePartner(member.id, { completedTasks: Number(event.target.value) })} />
+                  </td>
+                  <td className="px-3 py-3">{member.strikeSystem}</td>
+                  <td className="px-3 py-3">
+                    {member.upworkUrl ? <a className="font-medium text-forest" href={member.upworkUrl} target="_blank" rel="noreferrer">Open</a> : <span className="text-zinc-400">Not set</span>}
+                  </td>
+                  <td className="px-3 py-3">
+                    {member.portfolio ? <a className="font-medium text-forest" href={member.portfolio} target="_blank" rel="noreferrer">Open</a> : <span className="text-zinc-400">Not set</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!partnerMembers.length && <p className="p-4 text-sm text-zinc-500">No FR Partners connected yet.</p>}
+      </section>
     </div>
   );
 }

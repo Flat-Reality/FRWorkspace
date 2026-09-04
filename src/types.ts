@@ -1,7 +1,8 @@
 export type MemberStatus = 'active' | 'suspended' | 'sick_leave' | 'mental_health_days' | 'paused';
 export type ContractType = 'CORE TEAM' | 'INDEPENDENT PARTNER';
 export type BenefitProgram = 'FR Partners' | 'The Nick' | 'RAIN HEART';
-export type OnboardingContractType = 'None' | 'MASTER SERVICE AGREEMENT';
+export type OnboardingContractType = 'None' | 'MASTER SERVICE AGREEMENT' | 'UPWORK CONTRACT';
+export type PartnerStatus = 'available' | 'working_hours' | 'inactive';
 export type WorkRecordType = 'standard' | 'positive' | 'strike' | 'negative' | 'explanation_request';
 export type ScheduleDayStatus = 'completed' | 'overworked' | 'day_off';
 
@@ -43,9 +44,14 @@ export type WorkspaceMember = {
   estimatedHours: string;
   phoneNumber: string;
   benefitPrograms: BenefitProgram[];
+  upworkUrl: string;
   timeZone: string;
   strikeSystem: number;
   portfolio: string;
+  rate: string;
+  partnerStatus: PartnerStatus;
+  partnerIndex: number;
+  completedTasks: number;
   languages: string;
   software: string;
   seniority: string;
