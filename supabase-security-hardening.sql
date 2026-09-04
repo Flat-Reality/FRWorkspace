@@ -8,6 +8,10 @@ create table if not exists public.workspace_state_backup as
 select *
 from public.workspace_state;
 
+alter table public.workspace_state_backup enable row level security;
+revoke all on table public.workspace_state_backup from anon;
+revoke all on table public.workspace_state_backup from authenticated;
+
 create table if not exists public.workspace_credentials (
   member_id text primary key,
   employment_id text unique not null,
@@ -83,6 +87,10 @@ create table if not exists public.workspace_security_notes (
   note text not null,
   created_at timestamptz not null default now()
 );
+
+alter table public.workspace_security_notes enable row level security;
+revoke all on table public.workspace_security_notes from anon;
+revoke all on table public.workspace_security_notes from authenticated;
 
 insert into public.workspace_security_notes (id, note)
 values (
