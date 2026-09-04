@@ -45,7 +45,8 @@ import {
 } from 'lucide-react';
 import { benefitProgramOptions, emptyMember, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { isSupabaseConfigured } from './supabase';
-import { defaultWorkspaceState, loadWorkspaceState, saveWorkspaceState } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, defaultWorkspaceState, impersonateWorkspaceMember, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState } from './storage';
+import type { WorkspaceSession } from './storage';
 import type {
   BenefitProgram,
   ContractType,
@@ -216,8 +217,9 @@ async function verifyPassword(password: string, storedHash: string) {
 
 function getStoredSession() {
   try {
-    const session = JSON.parse(window.localStorage.getItem(SESSION_KEY) ?? 'null') as { memberId?: string; expiresAt?: number } | null;
-    if (!session?.memberId || !session.expiresAt || session.expiresAt < Date.now()) {
+    const session = JSON.parse(window.localStorage.getItem(SESSION_KEY) ?? 'null') as WorkspaceSession | null;
+    const expiresAt = typeof session?.expiresAt === 'string' ? new Date(session.expiresAt).getTime() : Number(session?.expiresAt ?? 0);
+    if (!session?.memberId || !expiresAt || expiresAt < Date.now()) {
       window.localStorage.removeItem(SESSION_KEY);
       return null;
     }
@@ -228,8 +230,8 @@ function getStoredSession() {
   }
 }
 
-function saveSession(memberId: string) {
-  window.localStorage.setItem(SESSION_KEY, JSON.stringify({ memberId, expiresAt: Date.now() + SESSION_DURATION_MS }));
+function saveSession(memberId: string, token?: string, expiresAt?: string | number) {
+  window.localStorage.setItem(SESSION_KEY, JSON.stringify({ memberId, token, expiresAt: expiresAt ?? Date.now() + SESSION_DURATION_MS }));
 }
 
 function clearSession() {
@@ -506,8 +508,9 @@ export default function App() {
 
   useEffect(() => {
     let isMounted = true;
+    const session = getStoredSession();
 
-    loadWorkspaceState()
+    loadWorkspaceState(session?.token)
       .then((state) => {
         if (!isMounted) return;
         const reconciled = reconcileWorkspace(state.members, state.workRecords);
@@ -518,7 +521,6 @@ export default function App() {
         setWorkRecords(reconciled.records);
         setScheduleShifts(state.scheduleShifts);
         setScheduleCompletions(state.scheduleCompletions);
-        const session = getStoredSession();
         const sessionMemberId = session?.memberId;
         if (sessionMemberId && reconciled.members.some((member) => member.id === sessionMemberId)) {
           setCurrentMemberId(sessionMemberId);
@@ -542,7 +544,13 @@ export default function App() {
     if (!isLoaded) return;
 
     const state: WorkspaceState = { members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions };
-    saveWorkspaceState(state)
+    const sessionToken = getStoredSession()?.token;
+    if (isSupabaseConfigured && !sessionToken) {
+      setSaveStatus('Sign in to connect database');
+      return;
+    }
+
+    saveWorkspaceState(state, sessionToken)
       .then(() => setSaveStatus(isSupabaseConfigured ? 'Saved to database' : 'Saved locally in this browser'))
       .catch(() => setSaveStatus('Could not save to database. Local copy is still saved.'));
   }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, isLoaded]);
@@ -583,6 +591,32 @@ export default function App() {
   }
 
   async function login() {
+    if (isSupabaseConfigured) {
+      try {
+        const response = await loginWorkspace(employmentId, password);
+        const reconciled = reconcileWorkspace(response.state.members, response.state.workRecords);
+        const member = reconciled.members.find((item) => item.id === response.session.memberId);
+        if (!member) throw new Error('Session member was not returned.');
+        setMembers(reconciled.members);
+        setLevels(response.state.levels.length ? response.state.levels : defaultWorkspaceState.levels);
+        setRewards(response.state.rewards);
+        setGuidePages(response.state.guidePages);
+        setWorkRecords(reconciled.records);
+        setScheduleShifts(response.state.scheduleShifts);
+        setScheduleCompletions(response.state.scheduleCompletions);
+        setCurrentMemberId(member.id);
+        saveSession(member.id, response.session.token, response.session.expiresAt);
+        setLoginIntroName(displayName(member));
+        window.setTimeout(() => setLoginIntroName(''), 1150);
+        setView('dashboard');
+        setLoginError('');
+        setPassword('');
+      } catch (error) {
+        setLoginError(error instanceof Error ? error.message : 'Employment ID or password is incorrect.');
+      }
+      return;
+    }
+
     const rawMember = members.find((item) => item.employmentId.toLowerCase() === employmentId.trim().toLowerCase());
     const member = rawMember ? normalizeMemberRuntime(rawMember) : null;
     if (!member) {
@@ -616,10 +650,43 @@ export default function App() {
     updateMembers(members.map((member) => (member.id === currentMember.id ? { ...member, ...changes } : member)));
   }
 
-  function impersonateMember(memberId: string) {
+  async function impersonateMember(memberId: string) {
+    if (isSupabaseConfigured) {
+      const token = getStoredSession()?.token;
+      if (!token) return;
+      try {
+        const response = await impersonateWorkspaceMember(token, memberId);
+        const reconciled = reconcileWorkspace(response.state.members, response.state.workRecords);
+        const member = reconciled.members.find((item) => item.id === response.session.memberId);
+        if (!member) return;
+        setMembers(reconciled.members);
+        setLevels(response.state.levels.length ? response.state.levels : defaultWorkspaceState.levels);
+        setRewards(response.state.rewards);
+        setGuidePages(response.state.guidePages);
+        setWorkRecords(reconciled.records);
+        setScheduleShifts(response.state.scheduleShifts);
+        setScheduleCompletions(response.state.scheduleCompletions);
+        setCurrentMemberId(member.id);
+        saveSession(member.id, response.session.token, response.session.expiresAt);
+        setView('dashboard');
+      } catch {
+        setSaveStatus('Could not sign in as this user.');
+      }
+      return;
+    }
+
     setCurrentMemberId(memberId);
     saveSession(memberId);
     setView('dashboard');
+  }
+
+  async function resetMemberPassword(memberId: string) {
+    const token = getStoredSession()?.token;
+    if (isSupabaseConfigured && token) {
+      await resetWorkspacePassword(token, memberId);
+      return;
+    }
+    updateMembers(members.map((member) => (member.id === memberId ? { ...member, passwordHash: '' } : member)));
   }
 
   function signOut() {
@@ -784,6 +851,7 @@ export default function App() {
               setWorkRecords={updateWorkRecords}
               updateWorkspace={updateMembers}
               impersonateMember={impersonateMember}
+              resetMemberPassword={resetMemberPassword}
             />
           )}
         </div>
@@ -812,7 +880,19 @@ function RecoveryWizard({ members, updateMembers, onClose }: { members: Workspac
   const [newPassword, setNewPassword] = useState('');
   const [error, setError] = useState('');
 
-  function checkRecoveryOptions() {
+  async function checkRecoveryOptions() {
+    if (isSupabaseConfigured) {
+      try {
+        await checkRecoveryOptionsServer(employmentId);
+        setError('');
+        setMemberId('__server__');
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'Recovery wizard cannot be used with these details. Contact your manager for manual recovery.');
+        setMemberId(null);
+      }
+      return;
+    }
+
     const member = members.find((item) => item.employmentId.toLowerCase() === employmentId.trim().toLowerCase());
     if (!member || member.passwordHash) {
       setError('Recovery wizard cannot be used with these details. Contact your manager for manual recovery.');
@@ -828,6 +908,16 @@ function RecoveryWizard({ members, updateMembers, onClose }: { members: Workspac
       setError('Password must contain at least 10 characters.');
       return;
     }
+    if (isSupabaseConfigured) {
+      try {
+        await recoverWorkspacePassword(employmentId, newPassword);
+        onClose();
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'Recovery wizard cannot be used with these details. Contact your manager for manual recovery.');
+      }
+      return;
+    }
+
     const passwordHash = await hashPassword(newPassword);
     updateMembers(members.map((member) => (member.id === memberId ? { ...member, passwordHash } : member)));
     onClose();
@@ -850,7 +940,7 @@ function RecoveryWizard({ members, updateMembers, onClose }: { members: Workspac
             autoComplete="on"
             onSubmit={(event) => {
               event.preventDefault();
-              checkRecoveryOptions();
+              void checkRecoveryOptions();
             }}
           >
             <label className="grid gap-2">
@@ -1971,6 +2061,7 @@ function Admin({
   setWorkRecords,
   updateWorkspace,
   impersonateMember,
+  resetMemberPassword,
 }: {
   members: WorkspaceMember[];
   levels: Level[];
@@ -1983,11 +2074,12 @@ function Admin({
   setGuidePages: Dispatch<SetStateAction<GuidePage[]>>;
   setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>>;
   updateWorkspace: WorkspaceUpdate;
-  impersonateMember: (memberId: string) => void;
+  impersonateMember: (memberId: string) => void | Promise<void>;
+  resetMemberPassword: (memberId: string) => void | Promise<void>;
 }) {
   const [module, setModule] = useState<AdminModule>('home');
 
-  if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} impersonateMember={impersonateMember} onBack={() => setModule('home')} />;
+  if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} impersonateMember={impersonateMember} resetMemberPassword={resetMemberPassword} onBack={() => setModule('home')} />;
   if (module === 'partners') return <AdminPartners members={members} setMembers={setMembers} onBack={() => setModule('home')} />;
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
@@ -2050,6 +2142,7 @@ function HrAdmin({
   setWorkRecords,
   updateWorkspace,
   impersonateMember,
+  resetMemberPassword,
   onBack,
 }: {
   members: WorkspaceMember[];
@@ -2059,7 +2152,8 @@ function HrAdmin({
   setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>;
   setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>>;
   updateWorkspace: WorkspaceUpdate;
-  impersonateMember: (memberId: string) => void;
+  impersonateMember: (memberId: string) => void | Promise<void>;
+  resetMemberPassword: (memberId: string) => void | Promise<void>;
   onBack: () => void;
 }) {
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
@@ -2130,6 +2224,7 @@ function HrAdmin({
           setMembers={setMembers}
           setWorkRecords={setWorkRecords}
           impersonateMember={impersonateMember}
+          resetMemberPassword={resetMemberPassword}
           onBack={() => setSelectedMemberId(null)}
         />
       )}
@@ -2168,6 +2263,7 @@ function MemberEditor({
   setMembers,
   setWorkRecords,
   impersonateMember,
+  resetMemberPassword,
   onBack,
 }: {
   member: WorkspaceMember;
@@ -2179,7 +2275,8 @@ function MemberEditor({
   updateMember: (changes: Partial<WorkspaceMember>) => void;
   setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>;
   setWorkRecords: Dispatch<SetStateAction<WorkRecord[]>>;
-  impersonateMember: (memberId: string) => void;
+  impersonateMember: (memberId: string) => void | Promise<void>;
+  resetMemberPassword: (memberId: string) => void | Promise<void>;
   onBack: () => void;
 }) {
   const tabs: Array<[HrTab, LucideIcon, string]> = [
@@ -2208,7 +2305,7 @@ function MemberEditor({
           ))}
         </div>
       </section>
-      {tab === 'profile' && <AdminProfileTab member={member} updateMember={updateMember} setMembers={setMembers} impersonateMember={impersonateMember} />}
+      {tab === 'profile' && <AdminProfileTab member={member} updateMember={updateMember} setMembers={setMembers} impersonateMember={impersonateMember} resetMemberPassword={resetMemberPassword} />}
       {tab === 'records' && <AdminRecordsTab member={member} records={records} setWorkRecords={setWorkRecords} />}
       {tab === 'levelup' && <AdminMemberLevelUpTab member={member} levels={levels} rewards={rewards} updateMember={updateMember} />}
       {tab === 'payments' && <AdminPaymentsTab member={member} updateMember={updateMember} />}
@@ -2218,7 +2315,7 @@ function MemberEditor({
   );
 }
 
-function AdminProfileTab({ member, updateMember, setMembers, impersonateMember }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; impersonateMember: (memberId: string) => void }) {
+function AdminProfileTab({ member, updateMember, setMembers, impersonateMember, resetMemberPassword }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; impersonateMember: (memberId: string) => void | Promise<void>; resetMemberPassword: (memberId: string) => void | Promise<void> }) {
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <Section title="Profile">
@@ -2261,11 +2358,11 @@ function AdminProfileTab({ member, updateMember, setMembers, impersonateMember }
       </Section>
       <Section title="Debug">
         <div className="flex flex-wrap gap-3">
-          <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-zinc-700" onClick={() => updateMember({ passwordHash: '' })}>
+          <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-zinc-700" onClick={() => void resetMemberPassword(member.id)}>
             <RotateCcw size={16} />
             Reset Password
           </button>
-          <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-3 text-sm font-medium text-white" onClick={() => impersonateMember(member.id)}>
+          <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-3 text-sm font-medium text-white" onClick={() => void impersonateMember(member.id)}>
             <KeyRound size={16} />
             Sign In As This User
           </button>

@@ -3,7 +3,12 @@ import { supabase } from './supabase';
 import type { ScheduleDayCompletion, ScheduleShift, WorkspaceMember, WorkspaceState } from './types';
 
 const STORAGE_KEY = 'flat-reality-workspace-state';
-const SUPABASE_STATE_ID = 'workspace';
+
+export type WorkspaceSession = {
+  token?: string;
+  memberId?: string;
+  expiresAt?: string | number;
+};
 
 export const defaultWorkspaceState: WorkspaceState = {
   members: initialMembers,
@@ -62,7 +67,7 @@ function normalizeCompletion(completion: Partial<ScheduleDayCompletion>): Schedu
   };
 }
 
-function normalizeWorkspaceState(state: Partial<WorkspaceState>): WorkspaceState {
+export function normalizeWorkspaceState(state: Partial<WorkspaceState>): WorkspaceState {
   const members = state.members?.length ? state.members.map(normalizeMember) : defaultWorkspaceState.members;
 
   return {
@@ -76,17 +81,44 @@ function normalizeWorkspaceState(state: Partial<WorkspaceState>): WorkspaceState
   };
 }
 
-export async function loadWorkspaceState(): Promise<WorkspaceState> {
-  if (supabase) {
-    const { data, error } = await supabase
-      .from('workspace_state')
-      .select('state')
-      .eq('id', SUPABASE_STATE_ID)
-      .maybeSingle();
+async function callWorkspaceApi<T>(payload: Record<string, unknown>): Promise<T> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase.functions.invoke('workspace-api', { body: payload });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data as T;
+}
 
-    if (!error && data?.state) {
-      return normalizeWorkspaceState(data.state as Partial<WorkspaceState>);
-    }
+export async function loginWorkspace(employmentId: string, password: string): Promise<{ session: WorkspaceSession; state: WorkspaceState }> {
+  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState> }>({ action: 'login', employmentId, password });
+  return { session: response.session, state: normalizeWorkspaceState(response.state) };
+}
+
+export async function checkRecoveryOptions(employmentId: string): Promise<void> {
+  await callWorkspaceApi({ action: 'recovery_options', employmentId });
+}
+
+export async function recoverWorkspacePassword(employmentId: string, password: string): Promise<void> {
+  await callWorkspaceApi({ action: 'recover', employmentId, password });
+}
+
+export async function resetWorkspacePassword(sessionToken: string, memberId: string): Promise<void> {
+  await callWorkspaceApi({ action: 'reset_password', sessionToken, memberId });
+}
+
+export async function impersonateWorkspaceMember(sessionToken: string, memberId: string): Promise<{ session: WorkspaceSession; state: WorkspaceState }> {
+  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState> }>({ action: 'impersonate', sessionToken, memberId });
+  return { session: response.session, state: normalizeWorkspaceState(response.state) };
+}
+
+export async function loadWorkspaceState(sessionToken?: string): Promise<WorkspaceState> {
+  if (supabase && sessionToken) {
+    const response = await callWorkspaceApi<{ state: Partial<WorkspaceState> }>({ action: 'load', sessionToken });
+    return normalizeWorkspaceState(response.state);
+  }
+
+  if (supabase && !sessionToken) {
+    return defaultWorkspaceState;
   }
 
   const localState = window.localStorage.getItem(STORAGE_KEY);
@@ -99,16 +131,10 @@ export async function loadWorkspaceState(): Promise<WorkspaceState> {
   }
 }
 
-export async function saveWorkspaceState(state: WorkspaceState) {
+export async function saveWorkspaceState(state: WorkspaceState, sessionToken?: string) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 
-  if (!supabase) return;
+  if (!supabase || !sessionToken) return;
 
-  const { error } = await supabase
-    .from('workspace_state')
-    .upsert({ id: SUPABASE_STATE_ID, state, updated_at: new Date().toISOString() });
-
-  if (error) {
-    throw error;
-  }
+  await callWorkspaceApi({ action: 'save', sessionToken, state });
 }
