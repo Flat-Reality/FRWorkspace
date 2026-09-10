@@ -711,6 +711,24 @@ export default function App() {
     setCurrentMemberId(null);
   }
 
+  if (!isLoaded) {
+    return (
+      <main className="min-h-screen bg-mist px-5 py-8 text-ink">
+        <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-5xl place-items-center">
+          <div className="grid justify-items-center gap-4 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-ink text-white shadow-soft">
+              <img className="h-7 w-7" src={BRAND_ICON} alt="" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Flat Reality Entertainment Group</p>
+              <h1 className="mt-3 text-3xl font-semibold tracking-normal text-ink">Loading Workspace</h1>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   if (!currentMember) {
     return (
       <main className="min-h-screen bg-mist px-5 py-8 text-ink">
