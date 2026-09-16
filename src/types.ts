@@ -5,6 +5,7 @@ export type OnboardingContractType = 'None' | 'MASTER SERVICE AGREEMENT' | 'UPWO
 export type PartnerStatus = 'available' | 'working_hours' | 'inactive';
 export type WorkRecordType = 'standard' | 'positive' | 'strike' | 'negative' | 'explanation_request';
 export type ScheduleDayStatus = 'completed' | 'overworked' | 'day_off';
+export type FileResourceType = 'Document file' | 'GitHub resource';
 
 export type AuditLogEntry = {
   id: string;
@@ -126,7 +127,20 @@ export type JumpLink = {
   icon: string;
   url: string;
   order: number;
-  internalView?: 'profile' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'levelup' | 'careerGrowth' | 'schedule';
+  internalView?: 'profile' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'levelup' | 'careerGrowth' | 'schedule' | 'files';
+};
+
+export type FileResource = {
+  id: string;
+  title: string;
+  url: string;
+  type: FileResourceType;
+};
+
+export type FileProject = {
+  id: string;
+  name: string;
+  resources: FileResource[];
 };
 
 export type GuidePage = {
@@ -144,4 +158,5 @@ export type WorkspaceState = {
   workRecords: WorkRecord[];
   scheduleShifts: ScheduleShift[];
   scheduleCompletions: ScheduleDayCompletion[];
+  fileProjects: FileProject[];
 };

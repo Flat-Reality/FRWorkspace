@@ -34,6 +34,7 @@ type WorkspaceState = {
   workRecords: Array<Record<string, unknown> & { id: string; memberId: string; type: string; explanationText?: string; explanationSubmittedAt?: string }>;
   scheduleShifts: Array<Record<string, unknown> & { memberId: string }>;
   scheduleCompletions: Array<Record<string, unknown> & { memberId: string }>;
+  fileProjects: Array<Record<string, unknown> & { id: string; resources?: Array<Record<string, unknown> & { id: string }> }>;
 };
 
 type AuditEvent = {
@@ -180,6 +181,7 @@ async function auditStateChanges(before: WorkspaceState, after: WorkspaceState, 
     ...diffCollection('reward', before.rewards as Array<Record<string, unknown> & { id: string }>, after.rewards as Array<Record<string, unknown> & { id: string }>, actor, after.members),
     ...diffCollection('schedule_shift', before.scheduleShifts, after.scheduleShifts, actor, after.members),
     ...diffCollection('schedule_completion', before.scheduleCompletions, after.scheduleCompletions, actor, after.members),
+    ...diffCollection('file_project', before.fileProjects, after.fileProjects, actor, after.members),
   ];
 
   for (const event of events.slice(0, 50)) await writeAuditLog(event);
@@ -209,6 +211,18 @@ function scrubState(state: WorkspaceState, actor: WorkspaceMember): WorkspaceSta
     scheduleShifts: state.scheduleShifts.filter((shift) => visibleMemberIds.has(shift.memberId)),
     scheduleCompletions: state.scheduleCompletions.filter((completion) => visibleMemberIds.has(completion.memberId)),
   };
+}
+
+function mergeUserFileProjects(previous: WorkspaceState['fileProjects'] = [], requested: WorkspaceState['fileProjects'] = []) {
+  return previous.map((project) => {
+    const requestedProject = requested.find((item) => item.id === project.id);
+    if (!requestedProject) return project;
+    const resources = Array.isArray(project.resources) ? project.resources : [];
+    const requestedResources = Array.isArray(requestedProject.resources) ? requestedProject.resources : [];
+    const resourceIds = new Set(resources.map((resource) => resource.id));
+    const addedResources = requestedResources.filter((resource) => resource.id && !resourceIds.has(resource.id));
+    return { ...project, resources: [...resources, ...addedResources] };
+  });
 }
 
 async function getCredential(member: WorkspaceMember) {
@@ -285,6 +299,7 @@ function mergeUserState(previous: WorkspaceState, requested: WorkspaceState, act
     workRecords,
     scheduleShifts,
     scheduleCompletions,
+    fileProjects: mergeUserFileProjects(previous.fileProjects, requested.fileProjects),
   };
 }
 

@@ -1,4 +1,4 @@
-import type { GuidePage, JumpLink, Level, Reward, WorkRecord, WorkspaceMember } from './types';
+import type { FileProject, GuidePage, JumpLink, Level, Reward, WorkRecord, WorkspaceMember } from './types';
 
 export const benefitProgramOptions = ['FR Partners', 'The Nick', 'RAIN HEART'] as const;
 
@@ -68,7 +68,13 @@ export const initialJumpLinks: JumpLink[] = [
   { id: 'jump-6', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 3 },
   { id: 'jump-7', title: 'Career Growth', icon: 'TrendingUp', url: '#career-growth', order: 4, internalView: 'careerGrowth' },
   { id: 'jump-8', title: 'Signed Documents', icon: 'FileCheck2', url: '#signed-documents', order: 5, internalView: 'signedDocuments' },
-  { id: 'jump-9', title: 'Installs', icon: 'Download', url: '#installs', order: 6, internalView: 'installs' },
+  { id: 'jump-10', title: 'Files', icon: 'Folder', url: '#files', order: 6, internalView: 'files' },
+  { id: 'jump-9', title: 'Installs', icon: 'Download', url: '#installs', order: 7, internalView: 'installs' },
+];
+
+export const initialFileProjects: FileProject[] = [
+  { id: 'files-the-nick', name: 'The Nick', resources: [] },
+  { id: 'files-rain-heart', name: 'RAIN HEART', resources: [] },
 ];
 
 export const initialGuidePages: GuidePage[] = [

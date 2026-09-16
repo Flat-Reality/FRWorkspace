@@ -19,7 +19,9 @@ import {
   ExternalLink,
   FileCheck2,
   FileText,
+  Folder,
   Gift,
+  Github,
   Gavel,
   HeartHandshake,
   HeartPulse,
@@ -38,12 +40,13 @@ import {
   Trophy,
   TrendingUp,
   Umbrella,
+  Upload,
   UserRound,
   UsersRound,
   WalletCards,
   Zap,
 } from 'lucide-react';
-import { benefitProgramOptions, emptyMember, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
+import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { isSupabaseConfigured } from './supabase';
 import { checkRecoveryOptions as checkRecoveryOptionsServer, defaultWorkspaceState, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState } from './storage';
 import type { WorkspaceSession } from './storage';
@@ -51,6 +54,8 @@ import type {
   AuditLogEntry,
   BenefitProgram,
   ContractType,
+  FileProject,
+  FileResourceType,
   GuidePage,
   JumpLink,
   Level,
@@ -68,7 +73,7 @@ import type {
   WorkspaceState,
 } from './types';
 
-type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule';
+type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files';
 type AdminModule = 'home' | 'hr' | 'partners' | 'guides' | 'levelup' | 'logs' | 'supabase';
 type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents' | 'schedule';
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
@@ -89,6 +94,7 @@ const iconMap: Record<string, LucideIcon> = {
   TrendingUp,
   CalendarDays,
   Download,
+  Folder,
   Settings2,
 };
 
@@ -145,11 +151,11 @@ function displayName(member: WorkspaceMember) {
 }
 
 function isIndependentPartner(member: WorkspaceMember) {
-  return member.contractType === 'INDEPENDENT PARTNER';
+  return String(member.contractType).toUpperCase().includes('INDEPENDENT');
 }
 
 function isCoreTeam(member: WorkspaceMember) {
-  return member.contractType === 'CORE TEAM';
+  return String(member.contractType).toUpperCase().includes('CORE');
 }
 
 function isUpworkContract(member: WorkspaceMember) {
@@ -511,6 +517,7 @@ export default function App() {
   const [workRecords, setWorkRecords] = useState<WorkRecord[]>([]);
   const [scheduleShifts, setScheduleShifts] = useState<ScheduleShift[]>([]);
   const [scheduleCompletions, setScheduleCompletions] = useState<ScheduleDayCompletion[]>([]);
+  const [fileProjects, setFileProjects] = useState<FileProject[]>(initialFileProjects);
   const [jumpLinks] = useState<JumpLink[]>(initialJumpLinks);
   const [guidePages, setGuidePages] = useState<GuidePage[]>(initialGuidePages);
   const [employmentId, setEmploymentId] = useState('');
@@ -538,6 +545,7 @@ export default function App() {
         setWorkRecords(reconciled.records);
         setScheduleShifts(state.scheduleShifts);
         setScheduleCompletions(state.scheduleCompletions);
+        setFileProjects(state.fileProjects);
         const sessionMemberId = session?.memberId;
         if (sessionMemberId && reconciled.members.some((member) => member.id === sessionMemberId)) {
           setCurrentMemberId(sessionMemberId);
@@ -560,7 +568,7 @@ export default function App() {
   useEffect(() => {
     if (!isLoaded) return;
 
-    const state: WorkspaceState = { members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions };
+    const state: WorkspaceState = { members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects };
     const sessionToken = getStoredSession()?.token;
     if (isSupabaseConfigured && !sessionToken) {
       setSaveStatus('Sign in to connect database');
@@ -570,7 +578,7 @@ export default function App() {
     saveWorkspaceState(state, sessionToken)
       .then(() => setSaveStatus(isSupabaseConfigured ? 'Saved to database' : 'Saved locally in this browser'))
       .catch(() => setSaveStatus('Could not save to database. Local copy is still saved.'));
-  }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, isLoaded]);
+  }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects, isLoaded]);
 
   const currentMember = members.find((member) => member.id === currentMemberId) ?? null;
   const currentLevel = currentMember ? getCurrentLevel(levels, currentMember.xp) : levels[0];
@@ -621,6 +629,7 @@ export default function App() {
         setWorkRecords(reconciled.records);
         setScheduleShifts(response.state.scheduleShifts);
         setScheduleCompletions(response.state.scheduleCompletions);
+        setFileProjects(response.state.fileProjects);
         setCurrentMemberId(member.id);
         saveSession(member.id, response.session.token, response.session.expiresAt);
         setLoginIntroName(displayName(member));
@@ -683,6 +692,7 @@ export default function App() {
         setWorkRecords(reconciled.records);
         setScheduleShifts(response.state.scheduleShifts);
         setScheduleCompletions(response.state.scheduleCompletions);
+        setFileProjects(response.state.fileProjects);
         setCurrentMemberId(member.id);
         saveSession(member.id, response.session.token, response.session.expiresAt);
         setView('dashboard');
@@ -869,6 +879,7 @@ export default function App() {
           )}
           {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} setWorkRecords={updateWorkRecords} />}
           {view === 'signedDocuments' && <SignedDocuments member={currentMember} />}
+          {view === 'files' && <FilesPage member={currentMember} fileProjects={fileProjects} setFileProjects={setFileProjects} />}
           {view === 'benefits' && <Placeholder title="Benefits" text="We are working on integrating this feature into Workspace!" />}
           {view === 'installs' && <Placeholder title="Installs" text="Install access will be added here later." />}
           {view === 'guides' && <Guides pages={guidePages} />}
@@ -2044,6 +2055,147 @@ function SignedDocuments({ member }: { member: WorkspaceMember }) {
         ) : (
           <p className="text-zinc-600">No signed documents are available yet.</p>
         )}
+      </div>
+    </section>
+  );
+}
+
+function FilesPage({ member, fileProjects, setFileProjects }: { member: WorkspaceMember; fileProjects: FileProject[]; setFileProjects: Dispatch<SetStateAction<FileProject[]>> }) {
+  const [activeProjectId, setActiveProjectId] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [draft, setDraft] = useState({ title: '', url: '', type: 'Document file' as FileResourceType });
+  const [editingId, setEditingId] = useState('');
+
+  function addProject() {
+    const name = newProjectName.trim();
+    if (!name || !member.isAdmin) return;
+    setFileProjects((projects) => [...projects, { id: `file-project-${Date.now()}`, name, resources: [] }]);
+    setNewProjectName('');
+  }
+
+  function saveResource(projectId: string) {
+    if (!draft.title.trim() || !draft.url.trim()) return;
+    setFileProjects((projects) =>
+      projects.map((project) =>
+        project.id === projectId
+          ? {
+              ...project,
+              resources: [...project.resources, { id: `file-resource-${Date.now()}`, title: draft.title.trim(), url: draft.url.trim(), type: draft.type }],
+            }
+          : project,
+      ),
+    );
+    setDraft({ title: '', url: '', type: 'Document file' });
+    setActiveProjectId('');
+  }
+
+  function updateResource(projectId: string, resourceId: string, changes: { title?: string; url?: string; type?: FileResourceType }) {
+    if (!member.isAdmin) return;
+    setFileProjects((projects) =>
+      projects.map((project) =>
+        project.id === projectId
+          ? { ...project, resources: project.resources.map((resource) => (resource.id === resourceId ? { ...resource, ...changes } : resource)) }
+          : project,
+      ),
+    );
+  }
+
+  function deleteResource(projectId: string, resourceId: string) {
+    if (!member.isAdmin) return;
+    setFileProjects((projects) => projects.map((project) => (project.id === projectId ? { ...project, resources: project.resources.filter((resource) => resource.id !== resourceId) } : project)));
+  }
+
+  return (
+    <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
+      <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Workspace Files</p>
+      <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-semibold">Files</h1>
+          <p className="mt-2 text-sm text-zinc-600">Shared documents and GitHub resources for workspace projects.</p>
+        </div>
+        {member.isAdmin && (
+          <div className="flex gap-2">
+            <input className="rounded-lg border border-line bg-white px-3 py-2 text-sm" value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="New project" />
+            <button className="rounded-lg bg-forest px-4 py-2 text-sm font-semibold text-white" onClick={addProject}>
+              Add project
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 grid gap-6">
+        {fileProjects.map((project) => (
+          <div key={project.id} className="grid gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-xl font-semibold">{project.name}</h2>
+              <button className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-forest" onClick={() => setActiveProjectId(activeProjectId === project.id ? '' : project.id)}>
+                <Upload size={16} />
+                Upload
+              </button>
+            </div>
+
+            {activeProjectId === project.id && (
+              <div className="grid gap-2 rounded-xl border border-line bg-mist p-4 sm:grid-cols-[1fr_1fr_180px_auto]">
+                <input className="rounded-lg border border-line bg-white px-3 py-2 text-sm" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Document title" />
+                <input className="rounded-lg border border-line bg-white px-3 py-2 text-sm" value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="Document URL" />
+                <select className="rounded-lg border border-line bg-white px-3 py-2 text-sm" value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as FileResourceType })}>
+                  <option>Document file</option>
+                  <option>GitHub resource</option>
+                </select>
+                <button className="rounded-lg bg-forest px-4 py-2 text-sm font-semibold text-white" onClick={() => saveResource(project.id)}>
+                  Save
+                </button>
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {project.resources.length ? (
+                project.resources.map((resource) => {
+                  const Icon = resource.type === 'GitHub resource' ? Github : FileText;
+                  const isEditing = member.isAdmin && editingId === resource.id;
+                  return (
+                    <article key={resource.id} className="rounded-xl border border-line bg-mist p-4">
+                      <div className="flex items-start gap-4">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-forest">
+                          <Icon size={19} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          {isEditing ? (
+                            <div className="grid gap-2">
+                              <input className="rounded-lg border border-line bg-white px-3 py-2 text-sm" value={resource.title} onChange={(event) => updateResource(project.id, resource.id, { title: event.target.value })} />
+                              <input className="rounded-lg border border-line bg-white px-3 py-2 text-sm" value={resource.url} onChange={(event) => updateResource(project.id, resource.id, { url: event.target.value })} />
+                              <select className="rounded-lg border border-line bg-white px-3 py-2 text-sm" value={resource.type} onChange={(event) => updateResource(project.id, resource.id, { type: event.target.value as FileResourceType })}>
+                                <option>Document file</option>
+                                <option>GitHub resource</option>
+                              </select>
+                            </div>
+                          ) : (
+                            <a className="block font-medium hover:text-forest" href={resource.url} target="_blank" rel="noreferrer">
+                              {resource.title}
+                            </a>
+                          )}
+                          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">{resource.type}</p>
+                        </div>
+                      </div>
+                      {member.isAdmin && (
+                        <div className="mt-3 flex gap-2">
+                          <button className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold" onClick={() => setEditingId(isEditing ? '' : resource.id)}>
+                            {isEditing ? 'Done' : 'Edit'}
+                          </button>
+                          <button className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600" onClick={() => deleteResource(project.id, resource.id)}>
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-zinc-600">No files have been added yet.</p>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );

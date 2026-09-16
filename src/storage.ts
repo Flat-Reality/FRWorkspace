@@ -1,6 +1,6 @@
-import { emptyMember, initialGuidePages, initialLevels, initialMembers, initialRewards, initialWorkRecords } from './data';
+import { emptyMember, initialFileProjects, initialGuidePages, initialLevels, initialMembers, initialRewards, initialWorkRecords } from './data';
 import { supabase } from './supabase';
-import type { AuditLogEntry, ScheduleDayCompletion, ScheduleShift, WorkspaceMember, WorkspaceState } from './types';
+import type { AuditLogEntry, FileProject, FileResource, ScheduleDayCompletion, ScheduleShift, WorkspaceMember, WorkspaceState } from './types';
 
 const STORAGE_KEY = 'flat-reality-workspace-state';
 
@@ -18,6 +18,7 @@ export const defaultWorkspaceState: WorkspaceState = {
   workRecords: initialWorkRecords,
   scheduleShifts: [],
   scheduleCompletions: [],
+  fileProjects: initialFileProjects,
 };
 
 function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
@@ -68,6 +69,23 @@ function normalizeCompletion(completion: Partial<ScheduleDayCompletion>): Schedu
   };
 }
 
+function normalizeFileResource(resource: Partial<FileResource>): FileResource {
+  return {
+    id: resource.id ?? `file-${Date.now()}`,
+    title: resource.title ?? 'Untitled file',
+    url: resource.url ?? '',
+    type: resource.type === 'GitHub resource' ? 'GitHub resource' : 'Document file',
+  };
+}
+
+function normalizeFileProject(project: Partial<FileProject>): FileProject {
+  return {
+    id: project.id ?? `project-${Date.now()}`,
+    name: project.name ?? 'Project',
+    resources: project.resources?.map(normalizeFileResource) ?? [],
+  };
+}
+
 export function normalizeWorkspaceState(state: Partial<WorkspaceState>): WorkspaceState {
   const members = state.members?.length ? state.members.map(normalizeMember) : defaultWorkspaceState.members;
 
@@ -79,6 +97,7 @@ export function normalizeWorkspaceState(state: Partial<WorkspaceState>): Workspa
     workRecords: state.workRecords?.length ? state.workRecords : defaultWorkspaceState.workRecords,
     scheduleShifts: state.scheduleShifts?.map(normalizeShift) ?? [],
     scheduleCompletions: state.scheduleCompletions?.map(normalizeCompletion) ?? [],
+    fileProjects: state.fileProjects?.length ? state.fileProjects.map(normalizeFileProject) : defaultWorkspaceState.fileProjects,
   };
 }
 
