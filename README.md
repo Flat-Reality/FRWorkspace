@@ -41,7 +41,7 @@ FR-ADMIN
 - Admin-created guide pages with simple text markup.
 - Supabase persistence when configured.
 - Browser local storage fallback for local testing.
-- GitHub Pages custom domain preparation for `workspace.flatreality.eu`.
+- GitHub Pages deployment at `https://flat-reality.github.io/FRWorkspace/`.
 
 ## Supabase
 
@@ -62,8 +62,8 @@ For the current MVP, the app stores workspace data in `workspace_state` as one J
 
 The project includes `.github/workflows/deploy-pages.yml`, so GitHub can publish the site automatically when changes are pushed to `main`.
 
-The `public/CNAME` file configures the custom domain:
+GitHub Pages publishes the project site at:
 
 ```text
-workspace.flatreality.eu
+https://flat-reality.github.io/FRWorkspace/
 ```

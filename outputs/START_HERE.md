@@ -36,8 +36,7 @@ FR-ADMIN
 - Career Growth показывает текущий seniority;
 - Admin перестроен на модули HR, Guide Writting и LevelUp! Configurator;
 - Supabase-сохранение через таблицу `workspace_state`;
-- GitHub Pages custom domain файл `public/CNAME`;
-- домен: `workspace.flatreality.eu`.
+- GitHub Pages project site: `https://flat-reality.github.io/FRWorkspace/`.
 
 ## Где редактировать
 

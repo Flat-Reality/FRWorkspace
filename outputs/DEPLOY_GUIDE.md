@@ -132,65 +132,17 @@ Secret: сюда вставь anon public key из Supabase
 3. Должен появиться процесс `Deploy GitHub Pages`.
 4. Если он зелёный - сайт опубликован.
 
-## 7. Подключить домен workspace.flatreality.eu
+## 7. Проверить сайт
 
-В проект уже добавлен файл:
-
-```text
-public/CNAME
-```
-
-В нём уже указано:
-
-```text
-workspace.flatreality.eu
-```
-
-Теперь в GitHub:
-
-1. Repository `Settings`.
-2. `Pages`.
-3. В поле `Custom domain` напиши:
-
-   ```text
-   workspace.flatreality.eu
-   ```
-
-4. Нажми `Save`.
-
-Потом у провайдера домена `flatreality.eu` создай DNS-запись:
-
-```text
-Type: CNAME
-Name: workspace
-Value: flat-reality.github.io
-```
-
-Если GitHub organization называется не `flat-reality`, а иначе, значение будет другое:
-
-```text
-ТВОЙ-АККАУНТ.github.io
-```
-
-## 8. Проверить сайт
-
-Когда GitHub Pages и DNS заработают, открой:
-
-```text
-https://workspace.flatreality.eu
-```
-
-Если домен ещё не работает, GitHub Pages даст временную ссылку вида:
+После успешного workflow GitHub Pages публикует проект по адресу:
 
 ```text
 https://flat-reality.github.io/FRWorkspace/
 ```
 
-Но с custom domain основной адрес должен быть:
+В `Settings` → `Pages` источником публикации должен быть `GitHub Actions`.
 
-```text
-https://workspace.flatreality.eu
-```
+## 8. Обновить сайт
 
 ## Как потом редактировать сайт
 

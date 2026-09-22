@@ -80,7 +80,8 @@ type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord
 
 const SESSION_KEY = 'flat-reality-workspace-session';
 const SESSION_DURATION_MS = 90 * 24 * 60 * 60 * 1000;
-const BRAND_ICON = '/resources/favicon/favicon-32x32.png';
+const ASSET_BASE = import.meta.env.BASE_URL;
+const BRAND_ICON = `${ASSET_BASE}resources/favicon/favicon-32x32.png`;
 
 const iconMap: Record<string, LucideIcon> = {
   HeartHandshake,
@@ -1293,7 +1294,7 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
 
       <Section title="Payment Information">
         <div className="rounded-xl border border-line bg-mist p-4">
-          {upworkMode && <img className="mb-4 h-8 w-auto" src="/resources/logos/upworklogo.webp" alt="Upwork" />}
+          {upworkMode && <img className="mb-4 h-8 w-auto" src={`${ASSET_BASE}resources/logos/upworklogo.webp`} alt="Upwork" />}
           <p className="leading-7 text-zinc-600">
             {upworkMode ? 'To update payout information, edit your Upwork disbursement methods.' : 'To update payout information, edit your profile through the Supplier portal.'}
           </p>
@@ -1329,7 +1330,7 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
 function VerificationCard({ member }: { member: WorkspaceMember }) {
   const isPartner = isIndependentPartner(member);
   const title = isPartner ? 'Vetted Network Verified Partner' : 'Core Team Verified Member';
-  const video = isPartner ? '/resources/videos/yellowgradient.mp4' : '/resources/videos/purplegradient.mp4';
+  const video = isPartner ? `${ASSET_BASE}resources/videos/yellowgradient.mp4` : `${ASSET_BASE}resources/videos/purplegradient.mp4`;
   const items = isPartner
     ? ['Access to Flat Reality and partner projects', 'Vetted Network Partner badge', 'Access to LevelUp! and other Flat Reality partner programs']
     : ['Flat Reality social programs', 'Additional protection', 'Association with Flat Reality'];
