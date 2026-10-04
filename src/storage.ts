@@ -109,7 +109,19 @@ export function normalizeWorkspaceState(state: Partial<WorkspaceState>): Workspa
 async function callWorkspaceApi<T>(payload: Record<string, unknown>): Promise<T> {
   if (!supabase) throw new Error('Supabase is not configured.');
   const { data, error } = await supabase.functions.invoke('workspace-api', { body: payload });
-  if (error) throw error;
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const responseBody = await context.json() as { error?: unknown };
+        if (typeof responseBody.error === 'string' && responseBody.error.trim()) message = responseBody.error;
+      } catch {
+        // Keep the transport error when the function did not return JSON.
+      }
+    }
+    throw new Error(message);
+  }
   if (data?.error) throw new Error(data.error);
   return data as T;
 }
