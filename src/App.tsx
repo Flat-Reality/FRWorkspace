@@ -8,6 +8,7 @@ import {
   Bell,
   BookOpen,
   Brain,
+  BriefcaseBusiness,
   Building2,
   CalendarClock,
   CalendarDays,
@@ -17,6 +18,7 @@ import {
   Clock,
   ClipboardList,
   Download,
+  DollarSign,
   ExternalLink,
   FileCheck2,
   FileText,
@@ -27,11 +29,13 @@ import {
   HeartHandshake,
   HeartPulse,
   KeyRound,
+  Link2,
   LayoutDashboard,
   LogOut,
   PenLine,
   Plus,
   RotateCcw,
+  RefreshCw,
   Save,
   Search,
   Settings2,
@@ -49,7 +53,7 @@ import {
 } from 'lucide-react';
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, defaultWorkspaceState, getEntraWorkspaceLogin, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectUpwork, getEntraWorkspaceLogin, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -68,6 +72,8 @@ import type {
   ScheduleDayCompletion,
   ScheduleDayStatus,
   ScheduleShift,
+  UpworkContractDraft,
+  UpworkSnapshot,
   WorkRecord,
   WorkRecordType,
   WorkspaceMember,
@@ -76,7 +82,7 @@ import type {
 
 type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files';
 type AdminModule = 'home' | 'hr' | 'partners' | 'guides' | 'levelup' | 'logs' | 'supabase';
-type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents' | 'schedule';
+type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents' | 'partners' | 'schedule';
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
 
 const SESSION_KEY = 'flat-reality-workspace-session';
@@ -87,6 +93,18 @@ const BRAND_ICON = publicAsset('resources/favicon/favicon-32x32.png');
 const ENTRA_ICON = publicAsset('resources/logos/entra-id.png');
 const ENTRA_SCAN_ANIMATION = 'https://assets-v2.lottiefiles.com/a/5ef1272e-117c-11ee-b2c4-a7c896093f14/z2bONj3JN4.lottie';
 const ENTRA_EMAIL_DOMAINS = ['flatreality.eu', 'flatrealitycompany.onmicrosoft.com'];
+const EMPTY_UPWORK_SNAPSHOT: UpworkSnapshot = {
+  eligible: false,
+  connected: false,
+  available: true,
+  connectionStatus: 'not_connected',
+  message: '',
+  lastSyncedAt: '',
+  profile: null,
+  contracts: [],
+  payments: null,
+  timeEntries: [],
+};
 
 function isAllowedEntraEmail(value: string) {
   const normalized = value.trim().toLowerCase();
@@ -201,6 +219,11 @@ function statusLabel(status: MemberStatus) {
 
 function formatEuroAmount(amount: number | undefined) {
   return `${Number(amount ?? 0).toFixed(2)}€`;
+}
+
+function formatUpworkMoney(value: { amount: number; currency: string } | null | undefined) {
+  if (!value) return '—';
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: value.currency || 'USD' }).format(value.amount);
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -579,6 +602,8 @@ export default function App() {
   const [isEntraLoginPending, setIsEntraLoginPending] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState('Loading workspace data...');
+  const [upworkSnapshot, setUpworkSnapshot] = useState<UpworkSnapshot>(EMPTY_UPWORK_SNAPSHOT);
+  const [upworkStatus, setUpworkStatus] = useState('');
 
   function applyLoadedState(state: WorkspaceState, sessionMemberId?: string | null) {
     const reconciled = reconcileWorkspace(state.members, state.workRecords);
@@ -682,6 +707,43 @@ export default function App() {
   }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects, isLoaded]);
 
   const currentMember = members.find((member) => member.id === currentMemberId) ?? null;
+
+  async function refreshUpwork(memberId = currentMemberId ?? '', force = false) {
+    const token = getStoredSession()?.token;
+    if (!token || !memberId || !isSupabaseConfigured) return;
+    try {
+      const snapshot = await getUpworkSnapshot(token, memberId, force);
+      if (memberId === currentMemberId) setUpworkSnapshot(snapshot);
+      setUpworkStatus(snapshot.message);
+    } catch (error) {
+      setUpworkStatus(error instanceof Error ? error.message : 'Upwork data could not be loaded.');
+    }
+  }
+
+  useEffect(() => {
+    if (!isLoaded || !currentMemberId) {
+      setUpworkSnapshot(EMPTY_UPWORK_SNAPSHOT);
+      return;
+    }
+    void refreshUpwork(currentMemberId);
+  }, [isLoaded, currentMemberId]);
+
+  useEffect(() => {
+    if (!isLoaded || !currentMemberId) return;
+    const url = new URL(window.location.href);
+    const connected = url.searchParams.get('upwork') === 'connected';
+    const upworkError = url.searchParams.get('upwork_error');
+    if (!connected && !upworkError) return;
+    if (connected) {
+      setUpworkStatus('Upwork connected successfully.');
+      void refreshUpwork(currentMemberId, true);
+    } else if (upworkError) {
+      setUpworkStatus(upworkError);
+    }
+    url.searchParams.delete('upwork');
+    url.searchParams.delete('upwork_error');
+    window.history.replaceState({}, '', url.toString());
+  }, [isLoaded, currentMemberId]);
   const currentLevel = currentMember ? getCurrentLevel(levels, currentMember.xp) : levels[0];
   const nextLevel = currentMember ? getNextLevel(levels, currentMember.xp) : null;
   const nextRewards = nextLevel ? rewards.filter((reward) => reward.levelId === nextLevel.id) : [];
@@ -1091,10 +1153,11 @@ export default function App() {
               progress={progress}
               jumpLinks={jumpLinks}
               workRecords={workRecords}
+              upwork={upworkSnapshot}
               setView={setView}
             />
           )}
-          {view === 'profile' && <Profile member={currentMember} updateCurrentMember={updateCurrentMember} onLogout={signOut} />}
+          {view === 'profile' && <Profile member={currentMember} upwork={upworkSnapshot} upworkStatus={upworkStatus} refreshUpwork={() => void refreshUpwork(currentMember.id, true)} updateCurrentMember={updateCurrentMember} onLogout={signOut} />}
           {view === 'levelup' && <LevelUp member={currentMember} levels={levels} rewards={rewards} />}
           {view === 'careerGrowth' && <CareerGrowth member={currentMember} />}
           {view === 'schedule' && currentMember.scheduleEnabled && (
@@ -1104,6 +1167,7 @@ export default function App() {
               completions={scheduleCompletions.filter((completion) => completion.memberId === currentMember.id)}
               setScheduleShifts={setScheduleShifts}
               setScheduleCompletions={setScheduleCompletions}
+              upwork={upworkSnapshot}
             />
           )}
           {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} setWorkRecords={updateWorkRecords} />}
@@ -1272,6 +1336,7 @@ function Dashboard({
   progress,
   jumpLinks,
   workRecords,
+  upwork,
   setView,
 }: {
   member: WorkspaceMember;
@@ -1281,6 +1346,7 @@ function Dashboard({
   progress: number;
   jumpLinks: JumpLink[];
   workRecords: WorkRecord[];
+  upwork: UpworkSnapshot;
   setView: (view: View) => void;
 }) {
   const pendingUserRequest = workRecords.find((record) => record.memberId === member.id && record.type === 'explanation_request' && !record.explanationText);
@@ -1317,6 +1383,7 @@ function Dashboard({
       }[member.status]
     : null;
   const InactiveStatusIcon = inactiveStatus?.icon;
+  const activeUpworkContract = isUpworkContract(member) ? upwork.contracts.find((contract) => contract.status === 'Active' && contract.currentMilestone) : undefined;
 
   return (
     <>
@@ -1383,6 +1450,24 @@ function Dashboard({
               <h2 className="text-2xl font-semibold">Complete onboarding</h2>
               <p className="mt-2 text-zinc-600">Earn 100 XP.</p>
             </div>
+          </div>
+        </section>
+      )}
+
+      {!isSuspended && activeUpworkContract?.currentMilestone && (
+        <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
+          <div className="grid gap-5 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div className="flex items-start gap-4">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-forest/10 text-forest">
+                <BriefcaseBusiness size={24} />
+              </span>
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Your Current Goal</p>
+                <h2 className="mt-2 text-2xl font-semibold">{activeUpworkContract.currentMilestone.description || activeUpworkContract.title}</h2>
+                <p className="mt-2 text-sm text-zinc-500">{activeUpworkContract.title}</p>
+              </div>
+            </div>
+            <p className="text-3xl font-semibold">{formatUpworkMoney(activeUpworkContract.currentMilestone.amount)}</p>
           </div>
         </section>
       )}
@@ -1479,8 +1564,34 @@ function Dashboard({
   );
 }
 
-function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceMember; updateCurrentMember: (changes: Partial<WorkspaceMember>) => void; onLogout: () => void }) {
+function Profile({ member, upwork, upworkStatus, refreshUpwork, updateCurrentMember, onLogout }: { member: WorkspaceMember; upwork: UpworkSnapshot; upworkStatus: string; refreshUpwork: () => void; updateCurrentMember: (changes: Partial<WorkspaceMember>) => void; onLogout: () => void }) {
   const upworkMode = isUpworkContract(member);
+  const activeUpworkContract = upwork.contracts.find((contract) => contract.status === 'Active');
+  const [isUpworkBusy, setIsUpworkBusy] = useState(false);
+
+  async function beginUpworkConnection() {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    setIsUpworkBusy(true);
+    try {
+      await connectUpwork(token);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Upwork connection could not be started.');
+      setIsUpworkBusy(false);
+    }
+  }
+
+  async function removeUpworkConnection() {
+    const token = getStoredSession()?.token;
+    if (!token || !window.confirm('Disconnect Upwork from this Workspace profile?')) return;
+    setIsUpworkBusy(true);
+    try {
+      await disconnectUpwork(token);
+      refreshUpwork();
+    } finally {
+      setIsUpworkBusy(false);
+    }
+  }
 
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
@@ -1495,6 +1606,36 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
             SSO Settings
           </a>
         </div>
+      )}
+
+      {(isIndependentPartner(member) || isFrPartnersConnected(member)) && (
+        <section className="grid gap-4 rounded-xl border border-line bg-mist p-5">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Partner Identity</p>
+              <h2 className="mt-1 text-xl font-semibold">Upwork</h2>
+              <p className="mt-2 text-sm text-zinc-600">{upworkStatus || upwork.message || 'Connect your account to synchronize contracts, payments and tracked time.'}</p>
+            </div>
+            {!upwork.connected ? (
+              <button className="inline-flex h-11 shrink-0 items-center justify-center gap-3 rounded-lg bg-black px-5 text-sm font-semibold text-white disabled:opacity-60" disabled={isUpworkBusy} onClick={() => void beginUpworkConnection()}>
+                <img className="h-5 w-auto brightness-0 invert" src={publicAsset('resources/logos/upworklogo.webp')} alt="" />
+                {isUpworkBusy ? 'Connecting...' : 'Connect Upwork'}
+              </button>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-black px-4 text-sm font-semibold text-white" onClick={refreshUpwork}><RefreshCw size={16} /> Sync</button>
+                <button className="h-10 rounded-lg border border-line bg-paper px-4 text-sm font-medium text-zinc-600" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button>
+              </div>
+            )}
+          </div>
+          {upwork.connected && upwork.profile && (
+            <div className="grid gap-3 border-t border-line pt-4 sm:grid-cols-3">
+              <div><p className="text-xs text-zinc-500">Profile</p>{upwork.profile.url ? <a className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-forest" href={upwork.profile.url} target="_blank" rel="noreferrer">Open profile <ExternalLink size={14} /></a> : <p className="mt-1 text-sm">Not provided</p>}</div>
+              <div><p className="text-xs text-zinc-500">Title</p><p className="mt-1 text-sm font-semibold">{upwork.profile.title || 'Not provided'}</p></div>
+              <div><p className="text-xs text-zinc-500">Rate</p><p className="mt-1 text-sm font-semibold">{formatUpworkMoney(upwork.profile.rate)}</p></div>
+            </div>
+          )}
+        </section>
       )}
 
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -1523,14 +1664,16 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
           <Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateCurrentMember({ preferredName: value })} />
           <Field label="Work Start Date" value={member.workStartDate} disabled onChange={() => undefined} />
           <Field label="Account Type" value={member.contractType} disabled onChange={() => undefined} />
-          <Field label="Contracts" value={member.onboarding.contractType} disabled onChange={() => undefined} />
+          <Field label="Contracts" value={activeUpworkContract && upworkMode ? `${activeUpworkContract.title} (UPWORK CONTRACT)` : member.onboarding.contractType} disabled onChange={() => undefined} />
           <Field label="Job Role" value={member.jobRole} disabled onChange={() => undefined} />
           <Field label="Entra ID Email" value={member.entraEmail} disabled onChange={() => undefined} />
           <Field label="Personal Email" value={member.personalEmail} disabled onChange={() => undefined} />
           <Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateCurrentMember({ phoneNumber: value })} />
           <Field label="Time Zone" value={member.timeZone} onChange={(value) => updateCurrentMember({ timeZone: value })} />
           <Field label="Portfolio" value={member.portfolio} onChange={(value) => updateCurrentMember({ portfolio: value })} />
-          {isFrPartnersConnected(member) && <Field label="Upwork Profile" value={member.upworkUrl} onChange={(value) => updateCurrentMember({ upworkUrl: value })} />}
+          {(isFrPartnersConnected(member) || isIndependentPartner(member)) && <Field label="Upwork Profile" value={upwork.profile?.url || member.upworkUrl} disabled={upwork.connected} onChange={(value) => updateCurrentMember({ upworkUrl: value })} />}
+          {upwork.connected && <Field label="Upwork Title" value={upwork.profile?.title || ''} disabled onChange={() => undefined} />}
+          {upwork.connected && <Field label="Upwork Rate" value={formatUpworkMoney(upwork.profile?.rate)} disabled onChange={() => undefined} />}
           <Field label="Connected Workflows" value={member.benefitPrograms.join(', ') || 'None'} disabled onChange={() => undefined} />
           <Field label="Estimated Hours" value={member.estimatedHours} disabled onChange={() => undefined} />
           <Field label="Rate" value={member.rate} disabled onChange={() => undefined} />
@@ -1725,12 +1868,14 @@ function Schedule({
   completions,
   setScheduleShifts,
   setScheduleCompletions,
+  upwork,
 }: {
   member: WorkspaceMember;
   shifts: ScheduleShift[];
   completions: ScheduleDayCompletion[];
   setScheduleShifts: Dispatch<SetStateAction<ScheduleShift[]>>;
   setScheduleCompletions: Dispatch<SetStateAction<ScheduleDayCompletion[]>>;
+  upwork: UpworkSnapshot;
 }) {
   const weekStart = getWeekStart();
   const [editingShift, setEditingShift] = useState<ScheduleShift | null>(null);
@@ -1751,6 +1896,8 @@ function Schedule({
   const isOverEstimated = estimatedHours > 0 && actualHoursTotal > estimatedHours;
   const isExactEstimated = estimatedHours > 0 && actualHoursTotal === estimatedHours;
   const HeaderIcon = isOverEstimated ? Ban : CalendarDays;
+
+  if (upwork.connected) return <UpworkSchedule member={member} upwork={upwork} />;
 
   function dayShifts(dayIndex: number) {
     return weekShifts.filter((shift) => shift.dayIndex === dayIndex).sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -1933,6 +2080,60 @@ function Schedule({
           }}
         />
       )}
+    </div>
+  );
+}
+
+function UpworkSchedule({ member, upwork }: { member: WorkspaceMember; upwork: UpworkSnapshot }) {
+  const weekStart = getWeekStart();
+  const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const entries = upwork.timeEntries.filter((entry) => entry.date >= weekStart && entry.date <= addDays(weekStart, 6));
+  const totalHours = entries.reduce((total, entry) => total + entry.hours, 0);
+  const totalCharges = entries.reduce((total, entry) => total + entry.charges, 0);
+  const currency = entries[0]?.currency ?? 'USD';
+
+  return (
+    <div className="grid gap-6">
+      <section className="animate-panel rounded-xl border border-line bg-paper p-6 shadow-soft">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div className="flex items-center gap-4">
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-black text-white"><Clock size={24} /></span>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">SCHEDULE BETA · UPWORK TIME TRACKER</p>
+              <h1 className="mt-2 text-3xl font-semibold md:text-5xl">{formatPlannerTime(totalHours)} tracked</h1>
+            </div>
+          </div>
+          <div className="text-right"><p className="text-sm text-zinc-500">Current week earnings</p><p className="mt-1 text-xl font-semibold">{formatUpworkMoney({ amount: totalCharges, currency })}</p></div>
+        </div>
+      </section>
+      <section className="animate-panel overflow-x-auto rounded-xl border border-line bg-paper p-4 shadow-soft">
+        <div className="grid min-w-[900px] grid-cols-7 divide-x divide-line">
+          {weekDays.map((day, dayIndex) => {
+            const date = addDays(weekStart, dayIndex);
+            const dayEntries = entries.filter((entry) => entry.date === date);
+            const hours = dayEntries.reduce((total, entry) => total + entry.hours, 0);
+            return (
+              <div key={day} className="min-h-[360px] p-3">
+                <div className="flex items-start justify-between gap-2 border-b border-line pb-3">
+                  <div><p className="font-semibold">{day}</p><p className="text-xs text-zinc-500">{formatDate(date)}</p></div>
+                  <span className="rounded-full bg-black px-2 py-1 text-xs font-semibold text-white">{formatPlannerTime(hours)}</span>
+                </div>
+                <div className="mt-3 grid gap-3">
+                  {dayEntries.map((entry) => (
+                    <article key={entry.id} className="rounded-lg border border-line bg-mist p-3">
+                      <p className="text-sm font-semibold">{entry.contractTitle || 'Upwork contract'}</p>
+                      <p className="mt-2 text-xs text-zinc-500">{formatPlannerTime(entry.hours)} · {formatUpworkMoney({ amount: entry.charges, currency: entry.currency })}</p>
+                      {entry.memo && <p className="mt-2 text-xs leading-5 text-zinc-600">{entry.memo}</p>}
+                    </article>
+                  ))}
+                  {!dayEntries.length && <p className="pt-3 text-xs text-zinc-400">No tracked time</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+      <p className="text-sm text-zinc-500">Time is synchronized from Upwork Time Tracker. Estimated hours: {member.estimatedHours || 'Not set'}.</p>
     </div>
   );
 }
@@ -2738,12 +2939,33 @@ function MemberEditor({
   resetMemberPassword: (memberId: string) => void | Promise<void>;
   onBack: () => void;
 }) {
+  const [memberUpwork, setMemberUpwork] = useState<UpworkSnapshot>(EMPTY_UPWORK_SNAPSHOT);
+  const [upworkMessage, setUpworkMessage] = useState('Loading Upwork connection...');
+  const [showContractWizard, setShowContractWizard] = useState(false);
+
+  async function refreshMemberUpwork(force = false) {
+    const token = getStoredSession()?.token;
+    if (!token || !isSupabaseConfigured) return;
+    try {
+      const snapshot = await getUpworkSnapshot(token, member.id, force);
+      setMemberUpwork(snapshot);
+      setUpworkMessage(snapshot.message);
+    } catch (error) {
+      setUpworkMessage(error instanceof Error ? error.message : 'Upwork data could not be loaded.');
+    }
+  }
+
+  useEffect(() => {
+    void refreshMemberUpwork();
+  }, [member.id]);
+
   const tabs: Array<[HrTab, LucideIcon, string]> = [
     ['profile', UserRound, 'Profile'],
     ['records', ClipboardList, 'Work Records'],
     ['levelup', Trophy, 'LevelUp!'],
     ['payments', WalletCards, 'Payments'],
     ['documents', FileCheck2, 'Documents'],
+    ['partners', Link2, 'Partners™'],
     ['schedule', CalendarDays, 'Schedule'],
   ];
 
@@ -2767,9 +2989,11 @@ function MemberEditor({
       {tab === 'profile' && <AdminProfileTab member={member} updateMember={updateMember} setMembers={setMembers} impersonateMember={impersonateMember} resetMemberPassword={resetMemberPassword} />}
       {tab === 'records' && <AdminRecordsTab member={member} records={records} setWorkRecords={setWorkRecords} />}
       {tab === 'levelup' && <AdminMemberLevelUpTab member={member} levels={levels} rewards={rewards} updateMember={updateMember} />}
-      {tab === 'payments' && <AdminPaymentsTab member={member} updateMember={updateMember} />}
-      {tab === 'documents' && <AdminDocumentsTab member={member} updateMember={updateMember} />}
+      {tab === 'payments' && <AdminPaymentsTab member={member} upwork={memberUpwork} updateMember={updateMember} />}
+      {tab === 'documents' && <AdminDocumentsTab member={member} updateMember={updateMember} onStartUpworkContract={() => setShowContractWizard(true)} />}
+      {tab === 'partners' && <AdminMemberPartnersTab member={member} upwork={memberUpwork} message={upworkMessage} refresh={() => void refreshMemberUpwork(true)} />}
       {tab === 'schedule' && <AdminScheduleTab member={member} updateMember={updateMember} />}
+      {showContractWizard && <UpworkContractWizard member={member} onClose={() => setShowContractWizard(false)} onCreated={(snapshot) => { setMemberUpwork(snapshot); setShowContractWizard(false); }} />}
     </div>
   );
 }
@@ -2982,19 +3206,134 @@ function AdminMemberLevelUpTab({ member, levels, rewards, updateMember }: { memb
   );
 }
 
-function AdminPaymentsTab({ member, updateMember }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
+function AdminMemberPartnersTab({ member, upwork, message, refresh }: { member: WorkspaceMember; upwork: UpworkSnapshot; message: string; refresh: () => void }) {
+  return (
+    <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
+      <Section title="Partners™">
+        <div className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-mist p-4 sm:flex-row sm:items-center">
+          <div>
+            <p className="font-semibold">Upwork Connection</p>
+            <p className="mt-1 text-sm text-zinc-600">{message || upwork.message}</p>
+            {upwork.lastSyncedAt && <p className="mt-2 text-xs text-zinc-500">Last synchronized: {formatDateTime(upwork.lastSyncedAt)}</p>}
+          </div>
+          <button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-black px-4 text-sm font-semibold text-white disabled:opacity-50" disabled={!upwork.connected} onClick={refresh}><RefreshCw size={16} /> Sync now</button>
+        </div>
+        {upwork.profile && (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <MetricCard label="Role" value={upwork.profile.title || 'Not provided'} />
+            <MetricCard label="Rate" value={formatUpworkMoney(upwork.profile.rate)} />
+            <div className="rounded-lg border border-line bg-mist p-4"><p className="text-xs font-medium uppercase tracking-[0.1em] text-zinc-500">Profile</p>{upwork.profile.url ? <a className="mt-2 inline-flex items-center gap-1 font-semibold text-forest" href={upwork.profile.url} target="_blank" rel="noreferrer">Open Upwork <ExternalLink size={15} /></a> : <p className="mt-2 font-semibold">Not provided</p>}</div>
+          </div>
+        )}
+      </Section>
+      <Section title="Contracts">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[850px] border-collapse text-sm">
+            <thead><tr className="border-b border-line text-left text-zinc-500"><th className="py-3">Name</th><th>Type</th><th>Rate</th><th>Weekly Limit</th><th>Status</th><th>Start</th><th>End</th></tr></thead>
+            <tbody>{upwork.contracts.map((contract) => <tr key={contract.id} className="border-b border-line"><td className="py-3 font-medium">{contract.title} (UPWORK CONTRACT)</td><td>{contract.type}</td><td>{formatUpworkMoney(contract.rate)}</td><td>{contract.weeklyLimit === null ? '—' : `${contract.weeklyLimit}h`}</td><td>{contract.status}</td><td>{formatDate(contract.startDate)}</td><td>{formatDate(contract.endDate)}</td></tr>)}</tbody>
+          </table>
+          {!upwork.contracts.length && <p className="py-4 text-sm text-zinc-500">No synchronized contracts yet.</p>}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function UpworkContractWizard({ member, onClose, onCreated }: { member: WorkspaceMember; onClose: () => void; onCreated: (snapshot: UpworkSnapshot) => void }) {
+  const [step, setStep] = useState(1);
+  const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [draft, setDraft] = useState<UpworkContractDraft>({
+    memberId: member.id,
+    title: '',
+    type: 'hourly',
+    rate: Number(String(member.rate).replace(/[^0-9.]/g, '')) || 0,
+    weeklyLimit: parseEstimatedHours(member.estimatedHours),
+    milestoneDescription: '',
+    milestoneAmount: 0,
+    startDate: today(),
+    endDate: '',
+  });
+
+  function set<K extends keyof UpworkContractDraft>(key: K, value: UpworkContractDraft[K]) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function submit() {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    setIsSaving(true);
+    setError('');
+    try {
+      const snapshot = await createUpworkContract(token, draft);
+      onCreated(snapshot);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'The Upwork contract could not be prepared.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-black/55 p-4">
+      <section className="w-full max-w-2xl rounded-xl border border-line bg-paper p-6 shadow-soft">
+        <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Upwork Contract Wizard · Step {step} of 2</p>
+        <h2 className="mt-2 text-3xl font-semibold">Create Upwork Contract</h2>
+        <p className="mt-2 text-sm text-zinc-600">For {displayName(member)}. Active hourly limits stay aligned with Estimated Hours ({draft.weeklyLimit || 0}h).</p>
+        {step === 1 ? (
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <Field label="Contract Name" value={draft.title} onChange={(value) => set('title', value)} />
+            <SelectField<'hourly' | 'fixed-price'> label="Billing Type" value={draft.type} options={['hourly', 'fixed-price']} onChange={(value) => set('type', value)} />
+            <Field label={draft.type === 'hourly' ? 'Hourly Rate ($)' : 'Contract Amount ($)'} type="number" value={draft.rate} onChange={(value) => set('rate', Number(value))} />
+            {draft.type === 'hourly' && <Field label="Weekly Limit" type="number" value={draft.weeklyLimit} disabled onChange={() => undefined} />}
+            <Field label="Start Date" type="date" value={draft.startDate} onChange={(value) => set('startDate', value)} />
+            <Field label="End Date" type="date" value={draft.endDate} onChange={(value) => set('endDate', value)} />
+          </div>
+        ) : (
+          <div className="mt-6 grid gap-4">
+            {draft.type === 'fixed-price' && <><Field label="First Milestone" value={draft.milestoneDescription} onChange={(value) => set('milestoneDescription', value)} /><Field label="Milestone Amount ($)" type="number" value={draft.milestoneAmount} onChange={(value) => set('milestoneAmount', Number(value))} /></>}
+            <div className="rounded-xl border border-line bg-mist p-4"><p className="font-semibold">{draft.title || 'Untitled Contract'} (UPWORK CONTRACT)</p><p className="mt-2 text-sm text-zinc-600">{draft.type === 'hourly' ? `${formatUpworkMoney({ amount: draft.rate, currency: 'USD' })}/hour · ${draft.weeklyLimit}h weekly limit` : `${formatUpworkMoney({ amount: draft.rate, currency: 'USD' })} fixed price`}</p></div>
+          </div>
+        )}
+        {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button className="h-11 rounded-lg border border-line bg-paper px-4 text-sm font-medium" onClick={onClose}>Cancel</button>
+          {step === 2 && <button className="h-11 rounded-lg border border-line bg-paper px-4 text-sm font-medium" onClick={() => setStep(1)}>Back</button>}
+          {step === 1 ? <button className="h-11 rounded-lg bg-forest px-5 text-sm font-semibold text-white" disabled={!draft.title.trim()} onClick={() => setStep(2)}>Continue</button> : <button className="h-11 rounded-lg bg-black px-5 text-sm font-semibold text-white disabled:opacity-60" disabled={isSaving} onClick={() => void submit()}>{isSaving ? 'Preparing...' : 'Prepare Upwork Contract'}</button>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AdminPaymentsTab({ member, upwork, updateMember }: { member: WorkspaceMember; upwork: UpworkSnapshot; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
   function toggleBenefit(program: BenefitProgram) {
     updateMember({
       benefitPrograms: member.benefitPrograms.includes(program) ? member.benefitPrograms.filter((item) => item !== program) : [...member.benefitPrograms, program],
     });
   }
 
+  const activeUpworkContract = isUpworkContract(member) && upwork.contracts.some((contract) => contract.status === 'Active');
+
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label="IBAN" value={member.iban} onChange={(value) => updateMember({ iban: value })} />
+        {!activeUpworkContract && <Field label="IBAN" value={member.iban} onChange={(value) => updateMember({ iban: value })} />}
         <Field label="Withheld Balance (€)" type="number" value={member.withheldBalance} onChange={(value) => updateMember({ withheldBalance: Number(value) })} />
       </div>
+      {activeUpworkContract && (
+        <Section title="Upwork Payments">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <MetricCard label="Tracked Hours" value={formatPlannerTime(upwork.timeEntries.reduce((total, entry) => total + entry.hours, 0))} />
+            <MetricCard label="Earnings" value={formatUpworkMoney(upwork.payments?.earnings)} />
+            <MetricCard label="Fees" value={formatUpworkMoney(upwork.payments?.fees)} />
+            <MetricCard label="Fixed-price Milestones" value={formatUpworkMoney(upwork.payments?.fixedPriceMilestones)} />
+            <MetricCard label="Paid" value={formatUpworkMoney(upwork.payments?.paid)} />
+            <MetricCard label="Pending" value={formatUpworkMoney(upwork.payments?.pending)} />
+            <MetricCard label="Workspace Reconciliation" value={upwork.payments ? formatEuroAmount(upwork.payments.reconciledBalance) : '—'} />
+          </div>
+        </Section>
+      )}
       <Section title="Connected Workflows">
         <div className="flex flex-wrap gap-2">
           {benefitProgramOptions.map((program) => (
@@ -3008,7 +3347,11 @@ function AdminPaymentsTab({ member, updateMember }: { member: WorkspaceMember; u
   );
 }
 
-function AdminDocumentsTab({ member, updateMember }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-lg border border-line bg-mist p-4"><p className="text-xs font-medium uppercase tracking-[0.1em] text-zinc-500">{label}</p><p className="mt-2 text-xl font-semibold">{value}</p></div>;
+}
+
+function AdminDocumentsTab({ member, updateMember, onStartUpworkContract }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void; onStartUpworkContract: () => void }) {
   function upsertDocument(documents: MemberDocument[], title: string, signed: boolean, url: string, category: 'onboarding' | 'other' = 'onboarding') {
     const existing = documents.find((doc) => doc.title === title);
     const nextDoc: MemberDocument = existing ? { ...existing, signed, url, category } : { id: `doc-${Date.now()}-${title}`, title, signed, url, category };
@@ -3051,7 +3394,10 @@ function AdminDocumentsTab({ member, updateMember }: { member: WorkspaceMember; 
             <input type="checkbox" checked={member.onboarding.completed} onChange={(event) => completeOnboarding(event.target.checked)} />
             Onboarding Completed (+100 XP once)
           </label>
-          <SelectField<OnboardingContractType> label="Contracts" value={member.onboarding.contractType} options={['None', 'MASTER SERVICE AGREEMENT', 'UPWORK CONTRACT']} onChange={(value) => updateMember({ onboarding: { ...member.onboarding, contractType: value } })} />
+          <SelectField<OnboardingContractType> label="Contracts" value={member.onboarding.contractType} options={['None', 'MASTER SERVICE AGREEMENT', 'UPWORK CONTRACT']} onChange={(value) => {
+            updateMember({ onboarding: { ...member.onboarding, contractType: value } });
+            if (value === 'UPWORK CONTRACT') onStartUpworkContract();
+          }} />
         </div>
       </Section>
       <Section title="Other Documents">
@@ -3086,7 +3432,7 @@ function DocumentCheck({ title, checked, url, onChange }: { title: string; check
 
 const partnerStatusOptions: Array<{ value: PartnerStatus; label: string; icon: LucideIcon; className: string }> = [
   { value: 'available', label: 'Available', icon: Zap, className: 'text-emerald-700' },
-  { value: 'working_hours', label: 'Working Hours', icon: Clock, className: 'text-amber-600' },
+  { value: 'working_hours', label: 'Busy', icon: Clock, className: 'text-amber-600' },
   { value: 'inactive', label: 'Inactive', icon: CircleOff, className: 'text-zinc-500' },
 ];
 
@@ -3131,6 +3477,19 @@ function PartnerStatusPicker({ member, onChange }: { member: WorkspaceMember; on
 
 function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMember[]; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; onBack: () => void }) {
   const partnerMembers = members.filter((member) => isFrPartnersConnected(member) && member.status !== 'suspended');
+  const [snapshots, setSnapshots] = useState<Record<string, UpworkSnapshot>>({});
+
+  useEffect(() => {
+    const token = getStoredSession()?.token;
+    if (!token || !isSupabaseConfigured) return;
+    void Promise.all(partnerMembers.map(async (member) => {
+      try {
+        return [member.id, await getUpworkSnapshot(token, member.id)] as const;
+      } catch {
+        return [member.id, EMPTY_UPWORK_SNAPSHOT] as const;
+      }
+    })).then((items) => setSnapshots(Object.fromEntries(items)));
+  }, [partnerMembers.map((member) => member.id).join('|')]);
 
   function updatePartner(memberId: string, changes: Partial<WorkspaceMember>) {
     setMembers((items) => items.map((member) => (member.id === memberId ? { ...member, ...changes } : member)));
@@ -3151,7 +3510,7 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
         <h1 className="mt-3 text-3xl font-semibold">FR Partners Board</h1>
       </section>
       <section className="overflow-x-auto rounded-xl border border-line bg-paper p-4 shadow-soft">
-        <table className="w-full min-w-[1280px] border-collapse text-sm">
+        <table className="w-full min-w-[1580px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-line text-left text-zinc-500">
               <th className="px-3 py-3">Name</th>
@@ -3160,6 +3519,8 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
               <th className="px-3 py-3">Seniority</th>
               <th className="px-3 py-3">Time Zone</th>
               <th className="px-3 py-3">Rate</th>
+              <th className="px-3 py-3">Active Contract</th>
+              <th className="px-3 py-3">Tracked Hours</th>
               <th className="px-3 py-3">Index</th>
               <th className="px-3 py-3">Completed Tasks</th>
               <th className="px-3 py-3">Strikes</th>
@@ -3169,6 +3530,9 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
           </thead>
           <tbody>
             {partnerMembers.map((member) => {
+              const snapshot = snapshots[member.id] ?? EMPTY_UPWORK_SNAPSHOT;
+              const activeContract = snapshot.contracts.find((contract) => contract.status === 'Active');
+              const effectiveMember = activeContract ? { ...member, partnerStatus: 'working_hours' as PartnerStatus } : member;
               return (
                 <tr key={member.id} className="border-b border-line align-middle">
                   <td className="px-3 py-3 font-medium">
@@ -3178,14 +3542,16 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
                     </span>
                   </td>
                   <td className="px-3 py-3">
-                    <PartnerStatusPicker member={member} onChange={(status) => updatePartnerStatus(member, status)} />
+                    <PartnerStatusPicker member={effectiveMember} onChange={(status) => updatePartnerStatus(member, status)} />
                   </td>
                   <td className="px-3 py-3">{member.jobRole || 'No role set'}</td>
                   <td className="px-3 py-3">{member.seniority || 'Not set'}</td>
                   <td className="px-3 py-3">{member.timeZone || 'Not set'}</td>
                   <td className="px-3 py-3">
-                    <input className="h-10 w-28 rounded-lg border border-line bg-white px-2 text-sm outline-none" value={member.rate} onChange={(event) => updatePartner(member.id, { rate: event.target.value })} />
+                    <input className="h-10 w-28 rounded-lg border border-line bg-white px-2 text-sm outline-none" value={snapshot.profile?.rate ? formatUpworkMoney(snapshot.profile.rate) : member.rate} disabled={Boolean(snapshot.profile?.rate)} onChange={(event) => updatePartner(member.id, { rate: event.target.value })} />
                   </td>
+                  <td className="px-3 py-3">{activeContract ? activeContract.title : '—'}</td>
+                  <td className="px-3 py-3">{formatPlannerTime(snapshot.timeEntries.reduce((total, entry) => total + entry.hours, 0))}</td>
                   <td className="px-3 py-3">
                     <input className="h-10 w-20 rounded-lg border border-line bg-white px-2 text-sm outline-none" type="number" value={member.partnerIndex} onChange={(event) => updatePartner(member.id, { partnerIndex: Number(event.target.value) })} />
                     <span className="ml-1 text-zinc-500">%</span>
@@ -3195,7 +3561,7 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
                   </td>
                   <td className="px-3 py-3">{member.strikeSystem}</td>
                   <td className="px-3 py-3">
-                    {member.upworkUrl ? <a className="font-medium text-forest" href={member.upworkUrl} target="_blank" rel="noreferrer">Open</a> : <span className="text-zinc-400">Not set</span>}
+                    {(snapshot.profile?.url || member.upworkUrl) ? <a className="font-medium text-forest" href={snapshot.profile?.url || member.upworkUrl} target="_blank" rel="noreferrer">Open</a> : <span className="text-zinc-400">Not set</span>}
                   </td>
                   <td className="px-3 py-3">
                     {member.portfolio ? <a className="font-medium text-forest" href={member.portfolio} target="_blank" rel="noreferrer">Open</a> : <span className="text-zinc-400">Not set</span>}

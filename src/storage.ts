@@ -1,6 +1,6 @@
 import { emptyMember, initialFileProjects, initialGuidePages, initialLevels, initialMembers, initialRewards, initialWorkRecords } from './data';
 import { supabase } from './supabase';
-import type { AuditLogEntry, FileProject, FileResource, ScheduleDayCompletion, ScheduleShift, WorkspaceMember, WorkspaceState } from './types';
+import type { AuditLogEntry, FileProject, FileResource, ScheduleDayCompletion, ScheduleShift, UpworkContractDraft, UpworkSnapshot, WorkspaceMember, WorkspaceState } from './types';
 
 const STORAGE_KEY = 'flat-reality-workspace-state';
 
@@ -124,6 +124,48 @@ async function callWorkspaceApi<T>(payload: Record<string, unknown>): Promise<T>
   }
   if (data?.error) throw new Error(data.error);
   return data as T;
+}
+
+async function callUpworkApi<T>(payload: Record<string, unknown>): Promise<T> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase.functions.invoke('upwork-oauth', { body: payload });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const responseBody = await context.json() as { error?: unknown };
+        if (typeof responseBody.error === 'string' && responseBody.error.trim()) message = responseBody.error;
+      } catch {
+        // Keep the transport error when the function did not return JSON.
+      }
+    }
+    throw new Error(message);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data as T;
+}
+
+export async function getUpworkSnapshot(sessionToken: string, memberId?: string, force = false): Promise<UpworkSnapshot> {
+  const response = await callUpworkApi<{ snapshot: UpworkSnapshot }>({ action: 'snapshot', sessionToken, memberId, force });
+  return response.snapshot;
+}
+
+export async function connectUpwork(sessionToken: string): Promise<void> {
+  const returnUrl = new URL(window.location.href);
+  returnUrl.search = '';
+  returnUrl.hash = '';
+  const response = await callUpworkApi<{ authorizationUrl: string }>({ action: 'connect', sessionToken, returnUrl: returnUrl.toString() });
+  window.location.assign(response.authorizationUrl);
+}
+
+export async function disconnectUpwork(sessionToken: string, memberId?: string): Promise<void> {
+  await callUpworkApi({ action: 'disconnect', sessionToken, memberId });
+}
+
+export async function createUpworkContract(sessionToken: string, draft: UpworkContractDraft): Promise<UpworkSnapshot> {
+  const response = await callUpworkApi<{ snapshot: UpworkSnapshot }>({ action: 'create_contract', sessionToken, draft });
+  return response.snapshot;
 }
 
 export async function loginWorkspace(employmentId: string, password: string): Promise<{ session: WorkspaceSession; state: WorkspaceState }> {

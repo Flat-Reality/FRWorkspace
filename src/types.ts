@@ -7,6 +7,72 @@ export type WorkRecordType = 'standard' | 'positive' | 'strike' | 'negative' | '
 export type ScheduleDayStatus = 'completed' | 'overworked' | 'day_off';
 export type FileResourceType = 'Document file' | 'GitHub resource';
 
+export type UpworkMoney = {
+  amount: number;
+  currency: string;
+};
+
+export type UpworkContract = {
+  id: string;
+  title: string;
+  type: 'hourly' | 'fixed-price';
+  rate: UpworkMoney | null;
+  weeklyLimit: number | null;
+  status: 'Active' | 'Paused' | 'Closed';
+  startDate: string;
+  endDate: string;
+  currentMilestone: { id: string; description: string; amount: UpworkMoney } | null;
+};
+
+export type UpworkTimeEntry = {
+  id: string;
+  date: string;
+  hours: number;
+  charges: number;
+  currency: string;
+  contractId: string;
+  contractTitle: string;
+  memo: string;
+};
+
+export type UpworkSnapshot = {
+  eligible: boolean;
+  connected: boolean;
+  available: boolean;
+  connectionStatus: 'not_connected' | 'connected' | 'disabled' | 'error';
+  message: string;
+  lastSyncedAt: string;
+  profile: {
+    url: string;
+    title: string;
+    rate: UpworkMoney | null;
+    photoUrl: string;
+  } | null;
+  contracts: UpworkContract[];
+  payments: {
+    earnings: UpworkMoney;
+    fees: UpworkMoney;
+    paid: UpworkMoney;
+    pending: UpworkMoney;
+    fixedPriceMilestones: UpworkMoney;
+    withheldBalance: number;
+    reconciledBalance: number;
+  } | null;
+  timeEntries: UpworkTimeEntry[];
+};
+
+export type UpworkContractDraft = {
+  memberId: string;
+  title: string;
+  type: 'hourly' | 'fixed-price';
+  rate: number;
+  weeklyLimit: number;
+  milestoneDescription: string;
+  milestoneAmount: number;
+  startDate: string;
+  endDate: string;
+};
+
 export type AuditLogEntry = {
   id: string;
   eventType: string;
