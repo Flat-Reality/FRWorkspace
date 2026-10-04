@@ -19,6 +19,9 @@ type WorkspaceMember = {
   passwordHash?: string;
   isAdmin?: boolean;
   preferredName?: string;
+  entraEmail?: string;
+  entraObjectId?: string;
+  workEmail?: string;
   phoneNumber?: string;
   timeZone?: string;
   portfolio?: string;
@@ -105,6 +108,32 @@ function displayName(member?: WorkspaceMember | null) {
   return member?.preferredName?.trim() || member?.employmentId || member?.id || 'System';
 }
 
+const ENTRA_EMAIL_DOMAINS = new Set(['flatreality.eu', 'flatrealitycompany.onmicrosoft.com']);
+
+function normalizeEmail(value: unknown) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function isAllowedEntraEmail(value: unknown) {
+  const [localPart, domain, ...rest] = normalizeEmail(value).split('@');
+  return Boolean(localPart && domain && !rest.length && ENTRA_EMAIL_DOMAINS.has(domain));
+}
+
+function validateEntraProfiles(state: WorkspaceState) {
+  const emails = new Set<string>();
+  const objectIds = new Set<string>();
+  for (const member of state.members) {
+    const email = normalizeEmail(member.entraEmail || member.workEmail);
+    if (email && !isAllowedEntraEmail(email)) return 'Entra ID Email must use @flatreality.eu or @flatrealitycompany.onmicrosoft.com.';
+    if (email && emails.has(email)) return 'Each Entra ID Email can be linked to only one Workspace profile.';
+    if (email) emails.add(email);
+    const objectId = String(member.entraObjectId ?? '').trim();
+    if (objectId && objectIds.has(objectId)) return 'Each Entra identity can be linked to only one Workspace profile.';
+    if (objectId) objectIds.add(objectId);
+  }
+  return '';
+}
+
 async function writeAuditLog({ eventType, actor, target, summary, payload = {} }: AuditEvent) {
   const now = new Date();
   await supabase.from('workspace_audit_log').insert({
@@ -130,7 +159,7 @@ function compactValue(value: unknown) {
 }
 
 function changedKeys(before: Record<string, unknown>, after: Record<string, unknown>) {
-  const ignored = new Set(['passwordHash', 'lastSeenAt']);
+  const ignored = new Set(['passwordHash', 'lastSeenAt', 'entraObjectId']);
   const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...keys].filter((key) => !ignored.has(key) && JSON.stringify(before[key]) !== JSON.stringify(after[key]));
 }
@@ -328,6 +357,62 @@ Deno.serve(async (request) => {
       return json({ session, state: scrubState(state, { ...member, lastSeenAt: new Date().toISOString() }) });
     }
 
+    if (action === 'entra_login') {
+      const authorization = request.headers.get('Authorization') ?? '';
+      const accessToken = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+      if (!accessToken) return json({ error: 'Microsoft session was not provided.' }, 401);
+
+      const { data: authData, error: authError } = await supabase.auth.getUser(accessToken);
+      const authUser = authData?.user;
+      if (authError || !authUser) return json({ error: 'Microsoft session is invalid or expired.' }, 401);
+
+      const providers = Array.isArray(authUser.app_metadata?.providers) ? authUser.app_metadata.providers : [];
+      const azureIdentity = authUser.identities?.find((identity) => identity.provider === 'azure');
+      if (authUser.app_metadata?.provider !== 'azure' && !providers.includes('azure') && !azureIdentity) {
+        return json({ error: 'This account was not authenticated through Microsoft Entra ID.' }, 403);
+      }
+
+      const entraEmail = normalizeEmail(authUser.email);
+      if (!isAllowedEntraEmail(entraEmail)) {
+        return json({ error: 'Use a Flat Reality Microsoft account to sign in.' }, 403);
+      }
+
+      const identityData = (azureIdentity?.identity_data ?? {}) as Record<string, unknown>;
+      const userMetadata = (authUser.user_metadata ?? {}) as Record<string, unknown>;
+      const entraObjectId = String(identityData.oid ?? userMetadata.oid ?? azureIdentity?.provider_id ?? '').trim();
+      if (!entraObjectId) return json({ error: 'Microsoft did not return a stable Entra identity.' }, 403);
+
+      let state = await loadState();
+      let member = state.members.find((item) => item.entraObjectId === entraObjectId);
+      if (!member) {
+        const emailMatches = state.members.filter((item) => normalizeEmail(item.entraEmail || item.workEmail) === entraEmail);
+        if (emailMatches.length !== 1) {
+          return json({ error: 'No Workspace profile is assigned to this Entra ID email. Contact your manager.' }, 403);
+        }
+        member = emailMatches[0];
+        if (member.entraObjectId && member.entraObjectId !== entraObjectId) {
+          return json({ error: 'This Workspace profile is already linked to another Entra identity.' }, 409);
+        }
+      }
+
+      const wasLinked = Boolean(member.entraObjectId);
+      const linkedMember = { ...member, entraEmail, entraObjectId, workEmail: undefined };
+      state = {
+        ...state,
+        members: state.members.map((item) => (item.id === linkedMember.id ? linkedMember : item)),
+      };
+      const { error: stateError } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state, updated_at: new Date().toISOString() });
+      if (stateError) throw stateError;
+
+      const session = await createSession(linkedMember);
+      state = await touchMemberLastSeen(state, linkedMember.id);
+      if (!wasLinked) {
+        await writeAuditLog({ eventType: 'identity.entra_linked', actor: linkedMember, target: linkedMember, summary: `${displayName(linkedMember)} linked a Microsoft Entra identity.` });
+      }
+      await writeAuditLog({ eventType: 'session.entra_login', actor: linkedMember, target: linkedMember, summary: `${displayName(linkedMember)} signed in with Microsoft Entra ID.` });
+      return json({ session, state: scrubState(state, { ...linkedMember, lastSeenAt: new Date().toISOString() }) });
+    }
+
     if (action === 'recovery_options') {
       const state = await loadState();
       const employmentId = String(body.employmentId ?? '').trim().toLowerCase();
@@ -408,6 +493,8 @@ Deno.serve(async (request) => {
       const requestedState = body.state as WorkspaceState;
       const nextState = context.actor.isAdmin ? requestedState : mergeUserState(context.state, requestedState, context.actor);
       nextState.members = nextState.members.map((member) => ({ ...member, passwordHash: '' }));
+      const entraValidationError = validateEntraProfiles(nextState);
+      if (entraValidationError) return json({ error: entraValidationError }, 400);
       const { error } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state: nextState, updated_at: new Date().toISOString() });
       if (error) throw error;
       await auditStateChanges(context.state, nextState, context.actor);

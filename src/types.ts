@@ -53,7 +53,8 @@ export type WorkspaceMember = {
   withheldBalance: number;
   personalEmail: string;
   jobRole: string;
-  workEmail: string;
+  entraEmail: string;
+  entraObjectId: string;
   estimatedHours: string;
   phoneNumber: string;
   benefitPrograms: BenefitProgram[];

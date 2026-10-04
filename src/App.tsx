@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, defaultWorkspaceState, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, defaultWorkspaceState, getEntraWorkspaceLogin, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -82,6 +82,14 @@ const SESSION_KEY = 'flat-reality-workspace-session';
 const SESSION_DURATION_MS = 90 * 24 * 60 * 60 * 1000;
 const publicAsset = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`;
 const BRAND_ICON = publicAsset('resources/favicon/favicon-32x32.png');
+const ENTRA_ICON = publicAsset('resources/logos/entra-id.png');
+const ENTRA_EMAIL_DOMAINS = ['flatreality.eu', 'flatrealitycompany.onmicrosoft.com'];
+
+function isAllowedEntraEmail(value: string) {
+  const normalized = value.trim().toLowerCase();
+  const [localPart, domain, ...rest] = normalized.split('@');
+  return Boolean(localPart && domain && !rest.length && ENTRA_EMAIL_DOMAINS.includes(domain));
+}
 
 const iconMap: Record<string, LucideIcon> = {
   HeartHandshake,
@@ -441,6 +449,36 @@ function Field({
   );
 }
 
+function EntraEmailField({ value, onChange, disabled = false }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  const [draft, setDraft] = useState(value);
+  const invalid = Boolean(draft.trim()) && !isAllowedEntraEmail(draft);
+
+  useEffect(() => setDraft(value), [value]);
+
+  function commit() {
+    if (!invalid) onChange(draft.trim().toLowerCase());
+  }
+
+  return (
+    <label className="grid gap-2">
+      <span className="text-sm font-medium text-zinc-600">Entra ID Email</span>
+      <input
+        className={`h-11 rounded-lg border bg-white px-3 text-sm outline-none transition disabled:bg-mist disabled:text-zinc-500 ${invalid ? 'border-red-500 focus:ring-4 focus:ring-red-500/10' : 'border-line focus:border-forest focus:ring-4 focus:ring-forest/10'}`}
+        type="email"
+        value={draft}
+        disabled={disabled}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+      />
+      {!disabled && (
+        <span className={`text-xs ${invalid ? 'text-red-600' : 'text-zinc-500'}`}>
+          Use @flatreality.eu or @flatrealitycompany.onmicrosoft.com.
+        </span>
+      )}
+    </label>
+  );
+}
+
 function SelectField<T extends string>({
   label,
   value,
@@ -528,38 +566,72 @@ export default function App() {
   const [loginIntroName, setLoginIntroName] = useState('');
   const [view, setView] = useState<View>('dashboard');
   const [loginError, setLoginError] = useState('');
+  const [isEntraLoginPending, setIsEntraLoginPending] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState('Loading workspace data...');
 
+  function applyLoadedState(state: WorkspaceState, sessionMemberId?: string | null) {
+    const reconciled = reconcileWorkspace(state.members, state.workRecords);
+    setMembers(reconciled.members);
+    setLevels(state.levels.length ? state.levels : defaultWorkspaceState.levels);
+    setRewards(state.rewards);
+    setGuidePages(state.guidePages);
+    setWorkRecords(reconciled.records);
+    setScheduleShifts(state.scheduleShifts);
+    setScheduleCompletions(state.scheduleCompletions);
+    setFileProjects(state.fileProjects);
+    if (sessionMemberId && reconciled.members.some((member) => member.id === sessionMemberId)) {
+      setCurrentMemberId(sessionMemberId);
+    }
+    return reconciled.members.find((member) => member.id === sessionMemberId) ?? null;
+  }
+
   useEffect(() => {
     let isMounted = true;
-    const session = getStoredSession();
 
-    loadWorkspaceState(session?.token)
-      .then((state) => {
-        if (!isMounted) return;
-        const reconciled = reconcileWorkspace(state.members, state.workRecords);
-        setMembers(reconciled.members);
-        setLevels(state.levels.length ? state.levels : defaultWorkspaceState.levels);
-        setRewards(state.rewards);
-        setGuidePages(state.guidePages);
-        setWorkRecords(reconciled.records);
-        setScheduleShifts(state.scheduleShifts);
-        setScheduleCompletions(state.scheduleCompletions);
-        setFileProjects(state.fileProjects);
-        const sessionMemberId = session?.memberId;
-        if (sessionMemberId && reconciled.members.some((member) => member.id === sessionMemberId)) {
-          setCurrentMemberId(sessionMemberId);
+    async function initialize() {
+      const storedSession = getStoredSession();
+      try {
+        if (storedSession?.token) {
+          const state = await loadWorkspaceState(storedSession.token);
+          if (!isMounted) return;
+          applyLoadedState(state, storedSession.memberId);
+          setSaveStatus(isSupabaseConfigured ? 'Database connected' : 'Saved locally in this browser');
+          return;
         }
-        setSaveStatus(isSupabaseConfigured ? 'Database connected' : 'Saved locally in this browser');
-      })
-      .catch(() => {
+
+        if (isSupabaseConfigured) {
+          try {
+            const response = await getEntraWorkspaceLogin();
+            if (response && isMounted) {
+              const member = applyLoadedState(response.state, response.session.memberId);
+              if (!member) throw new Error('The linked Workspace profile was not returned.');
+              saveSession(member.id, response.session.token, response.session.expiresAt);
+              setLoginIntroName(displayName(member));
+              window.setTimeout(() => setLoginIntroName(''), 1150);
+              setSaveStatus('Database connected');
+              setLoginError('');
+              return;
+            }
+          } catch (error) {
+            await signOutEntra().catch(() => undefined);
+            if (isMounted) setLoginError(error instanceof Error ? error.message : 'Microsoft sign-in could not be completed.');
+          }
+        }
+
+        const state = await loadWorkspaceState();
         if (!isMounted) return;
-        setSaveStatus('Using local workspace data');
-      })
-      .finally(() => {
+        applyLoadedState(state);
+        setSaveStatus(isSupabaseConfigured ? 'Sign in to connect database' : 'Saved locally in this browser');
+      } catch {
+        clearSession();
+        if (isMounted) setSaveStatus('Using local workspace data');
+      } finally {
         if (isMounted) setIsLoaded(true);
-      });
+      }
+    }
+
+    void initialize();
 
     return () => {
       isMounted = false;
@@ -672,6 +744,17 @@ export default function App() {
     setPassword('');
   }
 
+  async function loginWithEntra() {
+    setLoginError('');
+    setIsEntraLoginPending(true);
+    try {
+      await startEntraLogin();
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Microsoft sign-in could not be started.');
+      setIsEntraLoginPending(false);
+    }
+  }
+
   function updateCurrentMember(changes: Partial<WorkspaceMember>) {
     if (!currentMember) return;
     updateMembers(members.map((member) => (member.id === currentMember.id ? { ...member, ...changes } : member)));
@@ -717,9 +800,10 @@ export default function App() {
     updateMembers(members.map((member) => (member.id === memberId ? { ...member, passwordHash: '' } : member)));
   }
 
-  function signOut() {
+  async function signOut() {
     clearSession();
     setCurrentMemberId(null);
+    await signOutEntra().catch(() => undefined);
   }
 
   if (!isLoaded) {
@@ -762,6 +846,10 @@ export default function App() {
               void login();
             }}
           >
+            <div>
+              <p className="text-sm font-semibold text-ink">Legacy Sign In</p>
+              <p className="mt-1 text-xs text-zinc-500">Use your Employment ID and Workspace password.</p>
+            </div>
             <label className="grid gap-2">
               <span className="text-sm font-medium text-zinc-600">Employment ID</span>
               <input
@@ -790,6 +878,20 @@ export default function App() {
             </button>
             <button className="justify-self-start text-sm font-medium text-forest" type="button" onClick={() => setIsRecoveryOpen(true)}>
               Trouble signing in?
+            </button>
+            <div className="flex items-center gap-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-zinc-400">
+              <span className="h-px flex-1 bg-line" />
+              Or
+              <span className="h-px flex-1 bg-line" />
+            </div>
+            <button
+              className="inline-flex h-12 items-center justify-center gap-3 rounded-lg bg-[#0067b8] px-4 font-medium text-white transition hover:bg-[#005a9e] disabled:cursor-wait disabled:opacity-70"
+              type="button"
+              disabled={isEntraLoginPending}
+              onClick={() => void loginWithEntra()}
+            >
+              <img className="h-5 w-5 brightness-0 invert" src={ENTRA_ICON} alt="" />
+              {isEntraLoginPending ? 'Opening Microsoft...' : 'Log In with Entra ID'}
             </button>
           </form>
         </div>
@@ -1271,7 +1373,7 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
           <Field label="Account Type" value={member.contractType} disabled onChange={() => undefined} />
           <Field label="Contracts" value={member.onboarding.contractType} disabled onChange={() => undefined} />
           <Field label="Job Role" value={member.jobRole} disabled onChange={() => undefined} />
-          {member.contractType === 'CORE TEAM' && <Field label="Work Email" value={member.workEmail} disabled onChange={() => undefined} />}
+          <Field label="Entra ID Email" value={member.entraEmail} disabled onChange={() => undefined} />
           <Field label="Personal Email" value={member.personalEmail} disabled onChange={() => undefined} />
           <Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateCurrentMember({ phoneNumber: value })} />
           <Field label="Time Zone" value={member.timeZone} onChange={(value) => updateCurrentMember({ timeZone: value })} />
@@ -2515,12 +2617,13 @@ function AdminProfileTab({ member, updateMember, setMembers, impersonateMember, 
           <Field label="Full Name" value={member.fullName} onChange={(value) => updateMember({ fullName: value })} />
           <Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateMember({ preferredName: value })} />
           <Field label="Work Start Date" type="date" value={member.workStartDate} onChange={(value) => updateMember({ workStartDate: value })} />
-          <AccountTypeRadios value={member.contractType} onChange={(value) => updateMember({ contractType: value, workEmail: value === 'CORE TEAM' ? member.workEmail : '' })} />
+          <AccountTypeRadios value={member.contractType} onChange={(value) => updateMember({ contractType: value })} />
           <Field label="Address of Residence" value={member.addressOfResidence} onChange={(value) => updateMember({ addressOfResidence: value })} />
           <Field label="Citizenship Country" value={member.citizenshipCountry} onChange={(value) => updateMember({ citizenshipCountry: value })} />
           <Field label="Personal Email" value={member.personalEmail} onChange={(value) => updateMember({ personalEmail: value })} />
           <Field label="Job Role" value={member.jobRole} onChange={(value) => updateMember({ jobRole: value })} />
-          {member.contractType === 'CORE TEAM' && <Field label="Work Email" value={member.workEmail} onChange={(value) => updateMember({ workEmail: value })} />}
+          <EntraEmailField value={member.entraEmail} onChange={(value) => updateMember({ entraEmail: value })} />
+          {member.entraObjectId && <Field label="Entra Object ID" value={member.entraObjectId} disabled onChange={() => undefined} />}
           <Field label="Estimated Hours" value={member.estimatedHours} onChange={(value) => updateMember({ estimatedHours: value })} />
           <Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateMember({ phoneNumber: value })} />
           <Field label="Time Zone" value={member.timeZone} onChange={(value) => updateMember({ timeZone: value })} />

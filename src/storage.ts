@@ -22,9 +22,13 @@ export const defaultWorkspaceState: WorkspaceState = {
 };
 
 function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
+  const legacyMember = member as Partial<WorkspaceMember> & { workEmail?: string };
+  const { workEmail: legacyWorkEmail, ...memberWithoutLegacyWorkEmail } = legacyMember;
   return {
     ...emptyMember,
-    ...member,
+    ...memberWithoutLegacyWorkEmail,
+    entraEmail: member.entraEmail ?? legacyWorkEmail ?? '',
+    entraObjectId: member.entraObjectId ?? '',
     onboarding: {
       ...emptyMember.onboarding,
       ...(member.onboarding ?? {}),
@@ -112,6 +116,36 @@ async function callWorkspaceApi<T>(payload: Record<string, unknown>): Promise<T>
 export async function loginWorkspace(employmentId: string, password: string): Promise<{ session: WorkspaceSession; state: WorkspaceState }> {
   const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState> }>({ action: 'login', employmentId, password });
   return { session: response.session, state: normalizeWorkspaceState(response.state) };
+}
+
+export async function startEntraLogin(): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const redirectUrl = new URL(window.location.href);
+  redirectUrl.search = '';
+  redirectUrl.hash = '';
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'azure',
+    options: {
+      scopes: 'email openid profile',
+      redirectTo: redirectUrl.toString(),
+    },
+  });
+  if (error) throw error;
+}
+
+export async function getEntraWorkspaceLogin(): Promise<{ session: WorkspaceSession; state: WorkspaceState } | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  if (!data.session?.access_token) return null;
+  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState> }>({ action: 'entra_login' });
+  return { session: response.session, state: normalizeWorkspaceState(response.state) };
+}
+
+export async function signOutEntra(): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
 }
 
 export async function checkRecoveryOptions(employmentId: string): Promise<void> {
