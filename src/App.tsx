@@ -179,7 +179,7 @@ function isFrPartnersConnected(member: WorkspaceMember) {
 }
 
 function VerifiedMark({ member, size = 'md' }: { member: WorkspaceMember; size?: 'sm' | 'md' }) {
-  if (!isIndependentPartner(member) && !member.entraEmail.trim()) return null;
+  if (!isIndependentPartner(member) && !member.entraSetupCompleted) return null;
   return (
     <span className={`inline-flex shrink-0 items-center justify-center rounded-full text-white ${isIndependentPartner(member) ? 'bg-amber-400' : 'bg-forest'} ${size === 'sm' ? 'h-4 w-4' : 'h-5 w-5'}`}>
       <Check size={size === 'sm' ? 11 : 13} strokeWidth={3} />
@@ -1325,6 +1325,21 @@ function Dashboard({
         <h1 className="mt-3 text-3xl font-semibold md:text-5xl">Welcome back, {displayName(member)}</h1>
       </section>
 
+      {!isSuspended && isCoreTeam(member) && Boolean(member.entraEmail.trim()) && !member.entraSetupCompleted && (
+        <section className="rounded-xl border border-amber-300 bg-amber-50 p-6 shadow-soft">
+          <div className="flex items-start gap-4">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white text-amber-700 shadow-soft">
+              <KeyRound size={24} />
+            </span>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-amber-700">SSO Migration</p>
+              <h2 className="mt-2 text-2xl font-semibold">Entra ID sign-in will soon be required</h2>
+              <p className="mt-2 text-zinc-700">Your account is already linked to {member.entraEmail}. Sign out, then log in with Entra ID to finish connecting your identity.</p>
+            </div>
+          </div>
+        </section>
+      )}
+
       {isSuspended && (
         <section className="rounded-xl border border-red-700 bg-red-600 p-6 text-white shadow-soft">
           <div className="grid gap-5 md:grid-cols-[1fr_auto] md:items-center">
@@ -1471,9 +1486,14 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <VerificationCard member={member} />
       {!isIndependentPartner(member) && member.entraEmail.trim() && (
-        <div className="flex items-center gap-3 rounded-xl border border-[#71c9ee]/35 bg-[#1686c8]/5 px-4 py-3">
-          <img className="h-8 w-8 shrink-0" src={ENTRA_ICON} alt="" />
-          <p className="text-sm font-medium text-zinc-700">Microsoft Entra ID is linked to this account identity.</p>
+        <div className="flex flex-col gap-3 rounded-xl border border-[#71c9ee]/35 bg-[#1686c8]/5 px-4 py-3 sm:flex-row sm:items-center">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <img className="h-8 w-8 shrink-0" src={ENTRA_ICON} alt="" />
+            <p className="text-sm font-medium text-zinc-700">Microsoft Entra ID is linked to this account identity.</p>
+          </div>
+          <a className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-[#1686c8] px-4 text-sm font-semibold text-white transition hover:bg-[#0f73ad]" href="https://mysignins.microsoft.com/security-info" target="_blank" rel="noreferrer">
+            SSO Settings
+          </a>
         </div>
       )}
 
@@ -1563,7 +1583,7 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
 
 function VerificationCard({ member }: { member: WorkspaceMember }) {
   const isPartner = isIndependentPartner(member);
-  if (!isPartner && !member.entraEmail.trim()) {
+  if (!isPartner && !member.entraSetupCompleted) {
     return (
       <section className="flex items-start gap-4 rounded-xl border border-line bg-mist p-5">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-paper text-zinc-500">
@@ -1571,8 +1591,8 @@ function VerificationCard({ member }: { member: WorkspaceMember }) {
         </span>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Identity Pending</p>
-          <h2 className="mt-1 text-xl font-semibold">Core Team verification is not connected</h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-600">Ask an administrator to assign your Entra ID email to enable verified access.</p>
+          <h2 className="mt-1 text-xl font-semibold">Core Team verification is not complete</h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-600">{member.entraEmail.trim() ? `Sign in with ${member.entraEmail} through Entra ID to finish verification.` : 'Ask an administrator to assign your Entra ID email to enable verified access.'}</p>
         </div>
       </section>
     );
