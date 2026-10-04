@@ -55,6 +55,7 @@ export type WorkspaceMember = {
   jobRole: string;
   entraEmail: string;
   entraObjectId: string;
+  entraSetupCompleted: boolean;
   estimatedHours: string;
   phoneNumber: string;
   benefitPrograms: BenefitProgram[];

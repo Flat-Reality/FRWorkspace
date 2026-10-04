@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
+import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import type { LucideIcon } from 'lucide-react';
 import {
   BadgeCheck,
@@ -48,7 +49,7 @@ import {
 } from 'lucide-react';
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, defaultWorkspaceState, getEntraWorkspaceLogin, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, defaultWorkspaceState, getEntraWorkspaceLogin, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -79,10 +80,12 @@ type HrTab = 'profile' | 'records' | 'levelup' | 'payments' | 'documents' | 'sch
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
 
 const SESSION_KEY = 'flat-reality-workspace-session';
+const ENTRA_REMEMBERED_KEY = 'flat-reality-workspace-entra-remembered';
 const SESSION_DURATION_MS = 90 * 24 * 60 * 60 * 1000;
 const publicAsset = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`;
 const BRAND_ICON = publicAsset('resources/favicon/favicon-32x32.png');
 const ENTRA_ICON = publicAsset('resources/logos/entra-id.png');
+const ENTRA_SCAN_ANIMATION = 'https://assets-v2.lottiefiles.com/a/5ef1272e-117c-11ee-b2c4-a7c896093f14/z2bONj3JN4.lottie';
 const ENTRA_EMAIL_DOMAINS = ['flatreality.eu', 'flatrealitycompany.onmicrosoft.com'];
 
 function isAllowedEntraEmail(value: string) {
@@ -176,6 +179,7 @@ function isFrPartnersConnected(member: WorkspaceMember) {
 }
 
 function VerifiedMark({ member, size = 'md' }: { member: WorkspaceMember; size?: 'sm' | 'md' }) {
+  if (!isIndependentPartner(member) && !member.entraEmail.trim()) return null;
   return (
     <span className={`inline-flex shrink-0 items-center justify-center rounded-full text-white ${isIndependentPartner(member) ? 'bg-amber-400' : 'bg-forest'} ${size === 'sm' ? 'h-4 w-4' : 'h-5 w-5'}`}>
       <Check size={size === 'sm' ? 11 : 13} strokeWidth={3} />
@@ -564,6 +568,12 @@ export default function App() {
   const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
   const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
   const [loginIntroName, setLoginIntroName] = useState('');
+  const [entraSetupStage, setEntraSetupStage] = useState<'welcome' | 'identity' | 'setup' | 'complete' | null>(null);
+  const [entraSetupMemberId, setEntraSetupMemberId] = useState<string | null>(null);
+  const [entraPreferredName, setEntraPreferredName] = useState('');
+  const [isCompletingEntraSetup, setIsCompletingEntraSetup] = useState(false);
+  const [hasRememberedEntra, setHasRememberedEntra] = useState(() => window.localStorage.getItem(ENTRA_REMEMBERED_KEY) === '1');
+  const [showLegacyLogin, setShowLegacyLogin] = useState(false);
   const [view, setView] = useState<View>('dashboard');
   const [loginError, setLoginError] = useState('');
   const [isEntraLoginPending, setIsEntraLoginPending] = useState(false);
@@ -593,27 +603,45 @@ export default function App() {
       const storedSession = getStoredSession();
       try {
         if (storedSession?.token) {
-          const state = await loadWorkspaceState(storedSession.token);
-          if (!isMounted) return;
-          applyLoadedState(state, storedSession.memberId);
-          setSaveStatus(isSupabaseConfigured ? 'Database connected' : 'Saved locally in this browser');
-          return;
+          try {
+            const state = await loadWorkspaceState(storedSession.token);
+            if (!isMounted) return;
+            applyLoadedState(state, storedSession.memberId);
+            setSaveStatus(isSupabaseConfigured ? 'Database connected' : 'Saved locally in this browser');
+            return;
+          } catch {
+            clearSession();
+            await signOutEntra().catch(() => undefined);
+          }
         }
 
-        if (isSupabaseConfigured) {
+        const isEntraCallback = window.sessionStorage.getItem('flat-reality-workspace-entra-pending') === '1';
+        if (isSupabaseConfigured && isEntraCallback) {
           try {
             const response = await getEntraWorkspaceLogin();
             if (response && isMounted) {
               const member = applyLoadedState(response.state, response.session.memberId);
               if (!member) throw new Error('The linked Workspace profile was not returned.');
               saveSession(member.id, response.session.token, response.session.expiresAt);
-              setLoginIntroName(displayName(member));
-              window.setTimeout(() => setLoginIntroName(''), 1150);
+              window.localStorage.setItem(ENTRA_REMEMBERED_KEY, '1');
+              window.sessionStorage.removeItem('flat-reality-workspace-entra-pending');
+              setHasRememberedEntra(true);
+              if (response.firstLink) {
+                setEntraSetupMemberId(member.id);
+                setEntraPreferredName(member.preferredName);
+                setEntraSetupStage('welcome');
+                window.setTimeout(() => setEntraSetupStage('identity'), 1900);
+                window.setTimeout(() => setEntraSetupStage('setup'), 3900);
+              } else {
+                setLoginIntroName(displayName(member));
+                window.setTimeout(() => setLoginIntroName(''), 1150);
+              }
               setSaveStatus('Database connected');
               setLoginError('');
               return;
             }
           } catch (error) {
+            window.sessionStorage.removeItem('flat-reality-workspace-entra-pending');
             await signOutEntra().catch(() => undefined);
             if (isMounted) setLoginError(error instanceof Error ? error.message : 'Microsoft sign-in could not be completed.');
           }
@@ -755,6 +783,25 @@ export default function App() {
     }
   }
 
+  async function finishEntraSetup() {
+    const token = getStoredSession()?.token;
+    if (!token || !entraSetupMemberId) return;
+    setIsCompletingEntraSetup(true);
+    try {
+      const state = await completeEntraSetup(token, entraPreferredName);
+      applyLoadedState(state, entraSetupMemberId);
+      setEntraSetupStage('complete');
+      window.setTimeout(() => {
+        setEntraSetupStage(null);
+        setEntraSetupMemberId(null);
+      }, 650);
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : 'Account linking could not be completed.');
+    } finally {
+      setIsCompletingEntraSetup(false);
+    }
+  }
+
   function updateCurrentMember(changes: Partial<WorkspaceMember>) {
     if (!currentMember) return;
     updateMembers(members.map((member) => (member.id === currentMember.id ? { ...member, ...changes } : member)));
@@ -803,6 +850,7 @@ export default function App() {
   async function signOut() {
     clearSession();
     setCurrentMemberId(null);
+    setShowLegacyLogin(false);
     await signOutEntra().catch(() => undefined);
   }
 
@@ -819,6 +867,38 @@ export default function App() {
               <h1 className="mt-3 text-3xl font-semibold tracking-normal text-ink">Loading Workspace</h1>
             </div>
           </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!currentMember && hasRememberedEntra && !showLegacyLogin) {
+    return (
+      <main className="min-h-screen bg-mist px-5 py-8 text-ink">
+        <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-md place-items-center">
+          <section className="login-card grid w-full justify-items-center gap-5 rounded-xl border border-line bg-paper p-6 text-center shadow-soft">
+            <div className="h-44 w-44 overflow-hidden">
+              <DotLottieReact src={ENTRA_SCAN_ANIMATION} autoplay loop />
+            </div>
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#1686c8]">Microsoft Entra ID</p>
+              <h1 className="mt-2 text-3xl font-semibold">Welcome back</h1>
+              <p className="mt-2 text-sm leading-6 text-zinc-600">This browser remembers that you use your Flat Reality identity.</p>
+            </div>
+            {loginError && <p className="text-sm text-red-600">{loginError}</p>}
+            <button
+              className="entra-gradient-button inline-flex h-12 w-full items-center justify-center gap-3 rounded-lg px-4 font-semibold text-white disabled:cursor-wait disabled:opacity-70"
+              type="button"
+              disabled={isEntraLoginPending}
+              onClick={() => void loginWithEntra()}
+            >
+              <img className="h-5 w-5 brightness-0 invert" src={ENTRA_ICON} alt="" />
+              {isEntraLoginPending ? 'Opening Microsoft...' : 'Log In again with Entra ID'}
+            </button>
+            <button className="text-xs font-medium text-zinc-500 hover:text-ink" type="button" onClick={() => setShowLegacyLogin(true)}>
+              Legacy log in with eID
+            </button>
+          </section>
         </div>
       </main>
     );
@@ -911,6 +991,52 @@ export default function App() {
       {loginIntroName && (
         <div className="login-intro fixed inset-0 z-[60] grid place-items-center bg-mist">
           <h1 className="px-6 text-center text-4xl font-semibold text-ink md:text-6xl">Welcome back, {loginIntroName}</h1>
+        </div>
+      )}
+      {entraSetupStage && currentMember && (
+        <div className={`entra-setup-overlay fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-mist px-4 py-8 ${entraSetupStage === 'complete' ? 'is-complete' : ''}`}>
+          {entraSetupStage === 'welcome' && (
+            <h1 className="entra-welcome-title px-6 text-center text-4xl font-semibold md:text-6xl">Welcome back, {displayName(currentMember)}!</h1>
+          )}
+          {entraSetupStage === 'identity' && (
+            <div className="entra-identity-loader grid justify-items-center gap-5 text-center">
+              <span className="entra-icon-bounce flex h-28 w-28 items-center justify-center rounded-3xl bg-white shadow-soft">
+                <img className="h-20 w-20" src={ENTRA_ICON} alt="Microsoft Entra ID" />
+              </span>
+              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#1686c8]">Securing your identity</p>
+            </div>
+          )}
+          {entraSetupStage === 'setup' && (
+            <section className="entra-setup-card grid w-full max-w-lg gap-5 rounded-xl border border-[#71c9ee]/40 bg-paper p-6 shadow-soft">
+              <div className="flex items-start gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#1686c8]/10">
+                  <img className="h-8 w-8" src={ENTRA_ICON} alt="" />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#1686c8]">Microsoft Entra ID</p>
+                  <h1 className="mt-1 text-3xl font-semibold">Finish your setup</h1>
+                  <p className="mt-2 text-sm leading-6 text-zinc-600">Confirm the Workspace profile that will be linked to your organization identity.</p>
+                </div>
+              </div>
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-zinc-600">Preferred Name <span className="font-normal text-zinc-400">(optional)</span></span>
+                <input className="h-12 rounded-lg border border-line bg-paper px-4 outline-none transition focus:border-[#1686c8] focus:ring-4 focus:ring-[#1686c8]/10" value={entraPreferredName} onChange={(event) => setEntraPreferredName(event.target.value)} />
+              </label>
+              <Field label="Full Name" value={currentMember.fullName} disabled onChange={() => undefined} />
+              <Field label="Entra ID Email" value={currentMember.entraEmail} disabled onChange={() => undefined} />
+              {loginError && <p className="text-sm text-red-600">{loginError}</p>}
+              <button className="entra-gradient-button inline-flex h-12 items-center justify-center gap-3 rounded-lg px-4 font-semibold text-white disabled:cursor-wait disabled:opacity-70" type="button" disabled={isCompletingEntraSetup} onClick={() => void finishEntraSetup()}>
+                <img className="h-5 w-5 brightness-0 invert" src={ENTRA_ICON} alt="" />
+                {isCompletingEntraSetup ? 'Linking...' : 'Link your accounts'}
+              </button>
+            </section>
+          )}
+          {entraSetupStage === 'complete' && (
+            <div className="entra-link-complete grid justify-items-center gap-4 text-center">
+              <span className="flex h-20 w-20 items-center justify-center rounded-full bg-[#1686c8] text-white"><Check size={38} strokeWidth={3} /></span>
+              <h2 className="text-2xl font-semibold">Identity linked</h2>
+            </div>
+          )}
         </div>
       )}
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-4 lg:grid-cols-[250px_1fr] lg:px-6">
@@ -1344,6 +1470,12 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <VerificationCard member={member} />
+      {!isIndependentPartner(member) && member.entraEmail.trim() && (
+        <div className="flex items-center gap-3 rounded-xl border border-[#71c9ee]/35 bg-[#1686c8]/5 px-4 py-3">
+          <img className="h-8 w-8 shrink-0" src={ENTRA_ICON} alt="" />
+          <p className="text-sm font-medium text-zinc-700">Microsoft Entra ID is linked to this account identity.</p>
+        </div>
+      )}
 
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
@@ -1431,6 +1563,20 @@ function Profile({ member, updateCurrentMember, onLogout }: { member: WorkspaceM
 
 function VerificationCard({ member }: { member: WorkspaceMember }) {
   const isPartner = isIndependentPartner(member);
+  if (!isPartner && !member.entraEmail.trim()) {
+    return (
+      <section className="flex items-start gap-4 rounded-xl border border-line bg-mist p-5">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-paper text-zinc-500">
+          <KeyRound size={22} />
+        </span>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Identity Pending</p>
+          <h2 className="mt-1 text-xl font-semibold">Core Team verification is not connected</h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-600">Ask an administrator to assign your Entra ID email to enable verified access.</p>
+        </div>
+      </section>
+    );
+  }
   const title = isPartner ? 'Vetted Network Verified Partner' : 'Core Team Verified Member';
   const video = publicAsset(isPartner ? 'resources/videos/yellowgradient.mp4' : 'resources/videos/purplegradient.mp4');
   const items = isPartner

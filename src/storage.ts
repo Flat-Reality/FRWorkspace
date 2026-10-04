@@ -29,6 +29,7 @@ function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
     ...memberWithoutLegacyWorkEmail,
     entraEmail: member.entraEmail ?? legacyWorkEmail ?? '',
     entraObjectId: member.entraObjectId ?? '',
+    entraSetupCompleted: Boolean(member.entraSetupCompleted),
     onboarding: {
       ...emptyMember.onboarding,
       ...(member.onboarding ?? {}),
@@ -120,6 +121,7 @@ export async function loginWorkspace(employmentId: string, password: string): Pr
 
 export async function startEntraLogin(): Promise<void> {
   if (!supabase) throw new Error('Supabase is not configured.');
+  window.sessionStorage.setItem('flat-reality-workspace-entra-pending', '1');
   const redirectUrl = new URL(window.location.href);
   redirectUrl.search = '';
   redirectUrl.hash = '';
@@ -130,16 +132,24 @@ export async function startEntraLogin(): Promise<void> {
       redirectTo: redirectUrl.toString(),
     },
   });
-  if (error) throw error;
+  if (error) {
+    window.sessionStorage.removeItem('flat-reality-workspace-entra-pending');
+    throw error;
+  }
 }
 
-export async function getEntraWorkspaceLogin(): Promise<{ session: WorkspaceSession; state: WorkspaceState } | null> {
+export async function getEntraWorkspaceLogin(): Promise<{ session: WorkspaceSession; state: WorkspaceState; firstLink: boolean } | null> {
   if (!supabase) return null;
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
   if (!data.session?.access_token) return null;
-  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState> }>({ action: 'entra_login' });
-  return { session: response.session, state: normalizeWorkspaceState(response.state) };
+  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState>; firstLink?: boolean }>({ action: 'entra_login' });
+  return { session: response.session, state: normalizeWorkspaceState(response.state), firstLink: Boolean(response.firstLink) };
+}
+
+export async function completeEntraSetup(sessionToken: string, preferredName: string): Promise<WorkspaceState> {
+  const response = await callWorkspaceApi<{ state: Partial<WorkspaceState> }>({ action: 'complete_entra_setup', sessionToken, preferredName });
+  return normalizeWorkspaceState(response.state);
 }
 
 export async function signOutEntra(): Promise<void> {

@@ -21,6 +21,7 @@ type WorkspaceMember = {
   preferredName?: string;
   entraEmail?: string;
   entraObjectId?: string;
+  entraSetupCompleted?: boolean;
   workEmail?: string;
   phoneNumber?: string;
   timeZone?: string;
@@ -396,6 +397,7 @@ Deno.serve(async (request) => {
       }
 
       const wasLinked = Boolean(member.entraObjectId);
+      const firstLink = !wasLinked || !member.entraSetupCompleted;
       const linkedMember = { ...member, entraEmail, entraObjectId, workEmail: undefined };
       state = {
         ...state,
@@ -410,7 +412,7 @@ Deno.serve(async (request) => {
         await writeAuditLog({ eventType: 'identity.entra_linked', actor: linkedMember, target: linkedMember, summary: `${displayName(linkedMember)} linked a Microsoft Entra identity.` });
       }
       await writeAuditLog({ eventType: 'session.entra_login', actor: linkedMember, target: linkedMember, summary: `${displayName(linkedMember)} signed in with Microsoft Entra ID.` });
-      return json({ session, state: scrubState(state, { ...linkedMember, lastSeenAt: new Date().toISOString() }) });
+      return json({ session, state: scrubState(state, { ...linkedMember, lastSeenAt: new Date().toISOString() }), firstLink });
     }
 
     if (action === 'recovery_options') {
@@ -438,6 +440,23 @@ Deno.serve(async (request) => {
 
     const context = await actorFromToken(String(body.sessionToken ?? ''));
     if (!context) return json({ error: 'Session is invalid or expired.' }, 401);
+
+    if (action === 'complete_entra_setup') {
+      const preferredName = String(body.preferredName ?? '').trim().slice(0, 80);
+      const linkedMember = context.state.members.find((member) => member.id === context.actor.id);
+      if (!linkedMember?.entraObjectId || !isAllowedEntraEmail(linkedMember.entraEmail || '')) {
+        return json({ error: 'A linked Microsoft Entra identity is required.' }, 403);
+      }
+      const nextMember = { ...linkedMember, preferredName, entraSetupCompleted: true };
+      const nextState = {
+        ...context.state,
+        members: context.state.members.map((member) => (member.id === nextMember.id ? nextMember : member)),
+      };
+      const { error } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state: nextState, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      await writeAuditLog({ eventType: 'identity.entra_setup_completed', actor: nextMember, target: nextMember, summary: `${displayName(nextMember)} completed Microsoft Entra account linking.` });
+      return json({ state: scrubState(nextState, nextMember) });
+    }
 
     if (action === 'load') {
       const state = await touchMemberLastSeen(context.state, context.actor.id);

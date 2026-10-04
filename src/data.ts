@@ -17,6 +17,7 @@ export const emptyMember: WorkspaceMember = {
   jobRole: '',
   entraEmail: '',
   entraObjectId: '',
+  entraSetupCompleted: false,
   estimatedHours: '',
   phoneNumber: '',
   benefitPrograms: [],

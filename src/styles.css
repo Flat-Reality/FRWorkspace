@@ -127,6 +127,44 @@ button {
   animation-delay: 160ms;
 }
 
+.entra-gradient-button,
+.entra-welcome-title {
+  background: linear-gradient(105deg, #66d4f1 0%, #149ddd 44%, #1756a9 100%);
+}
+
+.entra-gradient-button {
+  background-size: 180% 180%;
+  animation: entra-gradient-shift 4s ease infinite;
+  box-shadow: 0 12px 26px rgb(20 157 221 / 0.22);
+}
+
+.entra-welcome-title {
+  background-size: 180% 180%;
+  background-clip: text;
+  color: transparent;
+  animation: entra-welcome-pop 1900ms cubic-bezier(0.16, 1, 0.3, 1) both, entra-gradient-shift 3s ease infinite;
+}
+
+.entra-identity-loader {
+  animation: entra-loader-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.entra-icon-bounce {
+  animation: entra-icon-bounce 820ms ease-in-out infinite;
+}
+
+.entra-setup-card {
+  animation: entra-setup-in 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.entra-link-complete {
+  animation: entra-complete-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.entra-setup-overlay.is-complete {
+  animation: entra-overlay-out 650ms ease both;
+}
+
 .workspace-content section,
 .workspace-content article,
 .workspace-content button,
@@ -237,12 +275,107 @@ button {
   }
 }
 
+@keyframes entra-gradient-shift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes entra-welcome-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+
+  24%,
+  72% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scaleX(0.18) scaleY(0.82);
+    filter: blur(6px);
+  }
+}
+
+@keyframes entra-loader-in {
+  from {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes entra-icon-bounce {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-14px) scale(1.04);
+  }
+}
+
+@keyframes entra-setup-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes entra-complete-in {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes entra-overlay-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-panel,
   .login-brand,
   .login-card,
   .login-intro,
   .login-intro h1,
+  .entra-gradient-button,
+  .entra-welcome-title,
+  .entra-identity-loader,
+  .entra-icon-bounce,
+  .entra-setup-card,
+  .entra-link-complete,
+  .entra-setup-overlay.is-complete,
   .workspace-sidebar,
   .workspace-content > * {
     animation: none;
