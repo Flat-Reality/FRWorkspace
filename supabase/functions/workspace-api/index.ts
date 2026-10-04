@@ -380,7 +380,11 @@ Deno.serve(async (request) => {
 
       const identityData = (azureIdentity?.identity_data ?? {}) as Record<string, unknown>;
       const userMetadata = (authUser.user_metadata ?? {}) as Record<string, unknown>;
-      const entraObjectId = String(identityData.oid ?? userMetadata.oid ?? azureIdentity?.provider_id ?? '').trim();
+      const identityClaims = (identityData.custom_claims ?? {}) as Record<string, unknown>;
+      const userClaims = (userMetadata.custom_claims ?? {}) as Record<string, unknown>;
+      const entraObjectId = String(
+        identityData.oid ?? identityClaims.oid ?? userMetadata.oid ?? userClaims.oid ?? azureIdentity?.provider_id ?? '',
+      ).trim();
       if (!entraObjectId) return json({ error: 'Microsoft did not return a stable Entra identity.' }, 403);
 
       let state = await loadState();
