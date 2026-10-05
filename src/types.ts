@@ -73,6 +73,32 @@ export type UpworkContractDraft = {
   endDate: string;
 };
 
+export type GitHubSnapshot = {
+  connected: boolean;
+  username: string;
+  profileUrl: string;
+  avatarUrl: string;
+  email: string;
+  membershipState: 'not_connected' | 'pending' | 'active' | 'error';
+  teamSlugs: string[];
+  syncError: string;
+  lastSyncedAt: string;
+};
+
+export type EntraDevice = {
+  id: string;
+  deviceId: string;
+  displayName: string;
+  operatingSystem: string;
+  operatingSystemVersion: string;
+  trustType: string;
+  accountEnabled: boolean;
+  isManaged: boolean;
+  isCompliant: boolean;
+  approximateLastSignInDateTime: string;
+  registrationDateTime: string;
+};
+
 export type AuditLogEntry = {
   id: string;
   eventType: string;
@@ -151,6 +177,9 @@ export type WorkspaceMember = {
   allowLegacyLogin?: boolean;
   githubConnected?: boolean;
   githubUsername?: string;
+  githubUserId?: string;
+  githubAvatarUrl?: string;
+  githubProfileUrl?: string;
   pendingUpworkContract?: Omit<UpworkContractDraft, 'memberId'>;
   onboarding: {
     gdprSigned: boolean;

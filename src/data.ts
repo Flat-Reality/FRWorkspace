@@ -47,6 +47,9 @@ export const emptyMember: WorkspaceMember = {
   allowLegacyLogin: true,
   githubConnected: false,
   githubUsername: '',
+  githubUserId: '',
+  githubAvatarUrl: '',
+  githubProfileUrl: '',
   onboarding: {
     gdprSigned: false,
     gdprUrl: '',

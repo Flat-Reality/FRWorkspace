@@ -41,6 +41,7 @@ import {
   Mail,
   MapPin,
   MessageCircle,
+  MonitorSmartphone,
   LogOut,
   PenLine,
   Phone,
@@ -67,7 +68,7 @@ import {
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectUpwork, getEntraAvatar, getEntraWorkspaceLogin, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin, syncEntraProfile } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin, syncEntraProfile, syncGitHubAccess } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -75,6 +76,8 @@ import type {
   ContractType,
   FileProject,
   FileResourceType,
+  EntraDevice,
+  GitHubSnapshot,
   GuidePage,
   JumpLink,
   Level,
@@ -96,7 +99,7 @@ import type {
 
 type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files';
 type AdminModule = 'home' | 'hr' | 'partners' | 'guides' | 'levelup' | 'logs' | 'supabase';
-type HrTab = 'overview' | 'contact' | 'records' | 'access' | 'levelup' | 'payments' | 'documents' | 'careerGrowth' | 'partners' | 'experiments';
+type HrTab = 'overview' | 'contact' | 'records' | 'access' | 'devices' | 'levelup' | 'payments' | 'documents' | 'careerGrowth' | 'partners' | 'experiments';
 type ProfileTab = 'profile' | 'contact' | 'payments' | 'skills' | 'integrations';
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
 
@@ -119,6 +122,17 @@ const EMPTY_UPWORK_SNAPSHOT: UpworkSnapshot = {
   contracts: [],
   payments: null,
   timeEntries: [],
+};
+const EMPTY_GITHUB_SNAPSHOT: GitHubSnapshot = {
+  connected: false,
+  username: '',
+  profileUrl: '',
+  avatarUrl: '',
+  email: '',
+  membershipState: 'not_connected',
+  teamSlugs: [],
+  syncError: '',
+  lastSyncedAt: '',
 };
 
 function isAllowedEntraEmail(value: string) {
@@ -1768,12 +1782,45 @@ function ProjectCards({ member }: { member: WorkspaceMember }) {
 
 function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwork, updateCurrentMember, onLogout, setView, tab, setTab }: { member: WorkspaceMember; avatarUrl: string; records: WorkRecord[]; upwork: UpworkSnapshot; upworkStatus: string; refreshUpwork: () => void; updateCurrentMember: (changes: Partial<WorkspaceMember>) => void; onLogout: () => void; setView: (view: View) => void; tab: ProfileTab; setTab: (tab: ProfileTab) => void }) {
   const [isUpworkBusy, setIsUpworkBusy] = useState(false);
+  const [github, setGitHub] = useState<GitHubSnapshot>(EMPTY_GITHUB_SNAPSHOT);
+  const [githubMessage, setGitHubMessage] = useState('');
+  const [isGitHubBusy, setIsGitHubBusy] = useState(false);
   const partner = isFrPartnersConnected(member);
   const index = calculatePartnerQualityIndex(member, upwork);
   const health = Math.max(0, 3 - member.strikeSystem);
   const trackedHours = upwork.timeEntries.reduce((total, entry) => total + entry.hours, 0);
   async function beginUpworkConnection() { const token = getStoredSession()?.token; if (!token) return; setIsUpworkBusy(true); try { await connectUpwork(token); } catch (error) { window.alert(error instanceof Error ? error.message : 'Upwork connection could not be started.'); setIsUpworkBusy(false); } }
   async function removeUpworkConnection() { const token = getStoredSession()?.token; if (!token || !window.confirm('Disconnect Upwork from this Workspace profile?')) return; setIsUpworkBusy(true); try { await disconnectUpwork(token); refreshUpwork(); } finally { setIsUpworkBusy(false); } }
+  async function refreshGitHub() {
+    const token = getStoredSession()?.token;
+    if (!token || !isSupabaseConfigured) return;
+    try {
+      setGitHub(await getGitHubSnapshot(token));
+      const message = new URL(window.location.href).searchParams.get('github_error');
+      setGitHubMessage(message || '');
+    } catch (error) {
+      setGitHubMessage(error instanceof Error ? error.message : 'GitHub data could not be loaded.');
+    }
+  }
+  useEffect(() => { void refreshGitHub(); }, [member.id]);
+  async function beginGitHubConnection() {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    setIsGitHubBusy(true);
+    try { await connectGitHub(token); } catch (error) { setGitHubMessage(error instanceof Error ? error.message : 'GitHub connection could not be started.'); setIsGitHubBusy(false); }
+  }
+  async function synchronizeGitHub() {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    setIsGitHubBusy(true);
+    try { setGitHub(await syncGitHubAccess(token)); setGitHubMessage('GitHub access synchronized.'); } catch (error) { setGitHubMessage(error instanceof Error ? error.message : 'GitHub access could not be synchronized.'); } finally { setIsGitHubBusy(false); }
+  }
+  async function removeGitHubConnection() {
+    const token = getStoredSession()?.token;
+    if (!token || !window.confirm('Disconnect GitHub from this Workspace profile?')) return;
+    setIsGitHubBusy(true);
+    try { await disconnectGitHub(token); setGitHub(EMPTY_GITHUB_SNAPSHOT); setGitHubMessage('GitHub disconnected.'); } catch (error) { setGitHubMessage(error instanceof Error ? error.message : 'GitHub could not be disconnected.'); } finally { setIsGitHubBusy(false); }
+  }
   const tabs: Array<[ProfileTab, LucideIcon, string]> = [['profile', UserRound, 'Profile'], ['contact', Contact, 'Contact'], ['payments', WalletCards, 'Payments'], ['skills', Sparkles, 'Skills'], ['integrations', Link2, 'Integrations']];
   return <div className="profile-viva grid gap-5 pb-8">
     <MemberHero member={member} avatarUrl={avatarUrl} />
@@ -1782,7 +1829,7 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
     {tab === 'contact' && <div className="grid gap-5"><section className="grid gap-4 rounded-xl border border-line bg-paper p-6 shadow-soft md:grid-cols-2"><Field label="Employment ID" value={member.employmentId} disabled onChange={() => undefined} /><Field label="Full Name" value={member.fullName} disabled onChange={() => undefined} /><Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateCurrentMember({ preferredName: value })} /><Field label="Entra ID Email" value={member.entraEmail} disabled onChange={() => undefined} /><Field label="Personal Email" value={member.personalEmail} disabled onChange={() => undefined} /><Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateCurrentMember({ phoneNumber: value })} /><Field label="Slack Tag" value={member.slackTag ?? ''} disabled onChange={() => undefined} /><Field label="Time Zone" value={member.timeZone} onChange={(value) => updateCurrentMember({ timeZone: value })} /><Field label="Portfolio" value={member.portfolio} onChange={(value) => updateCurrentMember({ portfolio: value })} /></section><a className="flex items-center justify-between rounded-xl border border-line bg-paper p-5 shadow-soft" href="https://join.slack.com/t/flatrealityeu/shared_invite/zt-3eeknccsz-MWbN2vlNbRNwu3blGs11kw" target="_blank" rel="noreferrer"><span><span className="block font-semibold">Need to change something else?</span><span className="mt-1 block text-sm text-zinc-500">Contact your manager via Slack.</span></span><span className="rounded-lg bg-[#4A154B] px-4 py-2 text-sm font-semibold text-white">Open Slack</span></a></div>}
     {tab === 'payments' && <div className="grid gap-5"><section className="flex items-center justify-between rounded-xl border border-line bg-paper p-6 shadow-soft"><div><p className="text-sm font-semibold text-zinc-500">Withheld Balance</p><p className="mt-2 text-sm text-zinc-500">Workspace reconciliation balance</p></div><strong className="text-4xl">{formatEuroAmount(member.withheldBalance)}</strong></section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">SupplierForm</h2><p className="mt-2 text-zinc-600">Update your payout and supplier information securely.</p><a className="mt-5 inline-flex h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white" href={isUpworkContract(member) ? 'https://www.upwork.com/nx/payments/disbursement-methods' : 'https://forms.office.com/r/maSdSX94Ui'} target="_blank" rel="noreferrer">{isUpworkContract(member) ? 'Open Upwork Payments' : 'Open Supplier Form'}</a></section></div>}
     {tab === 'skills' && <SkillsPanel member={member} editable updateMember={updateCurrentMember} />}
-    {tab === 'integrations' && <div className="grid gap-4"><section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><img className="h-11 w-11" src={ENTRA_ICON} alt="" /><div><h2 className="font-semibold">Microsoft Entra ID</h2><p className="mt-1 text-sm text-zinc-500">{member.entraEmail || 'Not connected'}</p></div></div>{member.entraEmail && <a className="rounded-lg bg-[#1686c8] px-4 py-2 text-sm font-semibold text-white" href="https://mysignins.microsoft.com/security-info" target="_blank" rel="noreferrer">SSO Settings</a>}</section>{(isIndependentPartner(member) || partner) && <section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div><h2 className="font-semibold">Upwork</h2><p className="mt-1 text-sm text-zinc-500">{upworkStatus || upwork.message || 'Synchronize partner contracts and payments.'}</p></div>{upwork.connected ? <div className="flex gap-2"><button className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" onClick={refreshUpwork}>Sync</button><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button></div> : <button className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" disabled={isUpworkBusy} onClick={() => void beginUpworkConnection()}><img className="h-5 w-auto brightness-0 invert" src={publicAsset('resources/logos/upworklogo.webp')} alt="" />Connect Upwork</button>}</section>}<section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><Github size={38} /><div><h2 className="font-semibold">GitHub</h2><p className="mt-1 text-sm text-zinc-500">Connect your developer identity and project repositories.</p></div></div><button className="rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" onClick={() => window.alert('GitHub integration will be configured in the next step.')}>Connect GitHub</button></section></div>}
+    {tab === 'integrations' && <div className="grid gap-4"><section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><img className="h-11 w-11" src={ENTRA_ICON} alt="" /><div><h2 className="font-semibold">Microsoft Entra ID</h2><p className="mt-1 text-sm text-zinc-500">{member.entraEmail || 'Not connected'}</p></div></div>{member.entraEmail && <a className="rounded-lg bg-[#1686c8] px-4 py-2 text-sm font-semibold text-white" href="https://mysignins.microsoft.com/security-info" target="_blank" rel="noreferrer">SSO Settings</a>}</section>{(isIndependentPartner(member) || partner) && <section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div><h2 className="font-semibold">Upwork</h2><p className="mt-1 text-sm text-zinc-500">{upworkStatus || upwork.message || 'Synchronize partner contracts and payments.'}</p></div>{upwork.connected ? <div className="flex gap-2"><button className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" onClick={refreshUpwork}>Sync</button><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button></div> : <button className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" disabled={isUpworkBusy} onClick={() => void beginUpworkConnection()}><img className="h-5 w-auto brightness-0 invert" src={publicAsset('resources/logos/upworklogo.webp')} alt="" />Connect Upwork</button>}</section>}<section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex min-w-0 items-center gap-4">{github.avatarUrl ? <img className="h-11 w-11 rounded-full object-cover" src={github.avatarUrl} alt="" /> : <Github size={38} />}<div className="min-w-0"><h2 className="font-semibold">GitHub</h2><p className="mt-1 truncate text-sm text-zinc-500">{github.connected ? `@${github.username} · ${github.membershipState === 'active' ? 'Organization access active' : github.membershipState === 'pending' ? 'Organization invitation pending' : 'Access needs attention'}` : 'Connect your developer identity and project repositories.'}</p>{(githubMessage || github.syncError) && <p className="mt-1 text-sm text-amber-700">{githubMessage || github.syncError}</p>}</div></div>{github.connected ? <div className="flex shrink-0 flex-wrap gap-2"><a className="rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" href={github.profileUrl} target="_blank" rel="noreferrer">Open GitHub</a><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isGitHubBusy} onClick={() => void synchronizeGitHub()}>Sync Access</button><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" disabled={isGitHubBusy} onClick={() => void removeGitHubConnection()}>Disconnect</button></div> : <button className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" disabled={isGitHubBusy} onClick={() => void beginGitHubConnection()}><Github size={18} />Connect GitHub</button>}</section></div>}
     <div className="flex flex-wrap gap-3 lg:hidden"><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" onClick={() => setView('dashboard')}>Home</button><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" onClick={onLogout}>Log Out</button></div>
   </div>;
 }
@@ -3239,6 +3286,7 @@ function MemberEditor({
     ['contact', Contact, 'Contact'],
     ['records', ClipboardList, 'Work Records'],
     ['access', ShieldCheck, 'Access & Role'],
+    ['devices', MonitorSmartphone, 'Devices'],
     ['levelup', Trophy, 'LevelUp!'],
     ['payments', WalletCards, 'Payments'],
     ['documents', FileCheck2, 'Documents'],
@@ -3267,6 +3315,7 @@ function MemberEditor({
       {tab === 'contact' && <AdminContactTab member={member} updateMember={updateMember} />}
       {tab === 'records' && <AdminRecordsTab member={member} records={records} setWorkRecords={setWorkRecords} />}
       {tab === 'access' && <AdminAccessRoleTab member={member} updateMember={updateMember} setMembers={setMembers} impersonateMember={impersonateMember} resetMemberPassword={resetMemberPassword} />}
+      {tab === 'devices' && <AdminDevicesTab member={member} />}
       {tab === 'levelup' && <AdminMemberLevelUpTab member={member} levels={levels} rewards={rewards} updateMember={updateMember} />}
       {tab === 'payments' && <AdminPaymentsTab member={member} upwork={memberUpwork} updateMember={updateMember} />}
       {tab === 'documents' && <AdminDocumentsTab member={member} updateMember={updateMember} onStartUpworkContract={() => setShowContractWizard(true)} />}
@@ -3310,6 +3359,32 @@ function AdminOverviewTab({ member, avatarUrl, upwork, updateMember }: { member:
 
 function AdminContactTab({ member, updateMember }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
   return <section className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft"><div><h2 className="text-xl font-semibold">Identity & Contact</h2><p className="mt-1 text-sm text-zinc-500">Workspace, Microsoft and personal contact information.</p></div><div className="grid gap-4 md:grid-cols-2"><Field label="Employment ID" value={member.employmentId} onChange={(value) => updateMember({ employmentId: value })} /><Field label="Employment ID Expiry" type="date" value={member.employmentIdExpiresAt ?? ''} onChange={(value) => updateMember({ employmentIdExpiresAt: value })} /><Field label="Full Name" value={member.fullName} onChange={(value) => updateMember({ fullName: value })} /><Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateMember({ preferredName: value })} /><EntraEmailField value={member.entraEmail} disabled={member.entraSetupCompleted} onChange={(value) => updateMember({ entraEmail: value })} /><Field label="Personal Email" value={member.personalEmail} onChange={(value) => updateMember({ personalEmail: value })} /><Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateMember({ phoneNumber: value })} /><Field label="Slack Tag" value={member.slackTag ?? ''} onChange={(value) => updateMember({ slackTag: value })} /><Field label="Street Address" value={member.addressStreet ?? member.addressOfResidence} onChange={(value) => updateMember({ addressStreet: value })} /><Field label="City" value={member.addressCity ?? ''} onChange={(value) => updateMember({ addressCity: value })} /><Field label="State or Province" value={member.addressState ?? ''} onChange={(value) => updateMember({ addressState: value })} /><Field label="Postal Code" value={member.addressPostalCode ?? ''} onChange={(value) => updateMember({ addressPostalCode: value })} /><Field label="Country or Region" value={member.addressCountry ?? ''} onChange={(value) => updateMember({ addressCountry: value })} /><Field label="Citizenship Country" value={member.citizenshipCountry} onChange={(value) => updateMember({ citizenshipCountry: value })} /><Field label="Time Zone" value={member.timeZone} onChange={(value) => updateMember({ timeZone: value })} /><Field label="Portfolio" value={member.portfolio} onChange={(value) => updateMember({ portfolio: value })} /></div></section>;
+}
+
+function AdminDevicesTab({ member }: { member: WorkspaceMember }) {
+  const [devices, setDevices] = useState<EntraDevice[]>([]);
+  const [status, setStatus] = useState(member.entraEmail ? 'Loading Microsoft Entra devices...' : 'This profile is not linked to Microsoft Entra ID.');
+
+  async function loadDevices() {
+    const token = getStoredSession()?.token;
+    if (!token || !member.entraEmail) return;
+    setStatus('Loading Microsoft Entra devices...');
+    try {
+      const nextDevices = await getEntraDevices(token, member.id);
+      setDevices(nextDevices);
+      setStatus(nextDevices.length ? '' : 'No registered devices were returned by Microsoft Entra ID.');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Microsoft Entra devices could not be loaded.');
+    }
+  }
+
+  useEffect(() => { void loadDevices(); }, [member.id, member.entraEmail]);
+
+  return <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
+    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-xl font-semibold">Microsoft Entra Devices</h2><p className="mt-1 text-sm text-zinc-500">Registered work identities and their latest Entra status.</p></div>{member.entraEmail && <button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-line px-4 text-sm font-semibold" onClick={() => void loadDevices()}><RefreshCw size={16} />Refresh</button>}</div>
+    {status && <div className="mt-6 rounded-lg border border-line bg-mist p-4 text-sm text-zinc-600">{status}</div>}
+    {!!devices.length && <div className="mt-6 grid gap-4 md:grid-cols-2">{devices.map((device) => <article key={device.id} className="rounded-xl border border-line bg-mist p-5"><div className="flex items-start gap-4"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-paper text-forest"><MonitorSmartphone size={22} /></span><div className="min-w-0 flex-1"><h3 className="truncate font-semibold">{device.displayName || device.deviceId || 'Unnamed device'}</h3><p className="mt-1 text-sm text-zinc-500">{[device.operatingSystem, device.operatingSystemVersion].filter(Boolean).join(' ') || 'Operating system not reported'}</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${device.accountEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-zinc-200 text-zinc-600'}`}>{device.accountEnabled ? 'Enabled' : 'Disabled'}</span></div><div className="mt-5 grid grid-cols-2 gap-3 text-sm"><div><p className="text-xs text-zinc-500">Trust type</p><p className="mt-1 font-medium">{device.trustType || 'Unknown'}</p></div><div><p className="text-xs text-zinc-500">Management</p><p className="mt-1 font-medium">{device.isManaged ? 'Managed' : 'Not managed'}</p></div><div><p className="text-xs text-zinc-500">Compliance</p><p className="mt-1 font-medium">{device.isCompliant ? 'Compliant' : 'Not reported'}</p></div><div><p className="text-xs text-zinc-500">Last sign-in</p><p className="mt-1 font-medium">{device.approximateLastSignInDateTime ? formatDateTime(device.approximateLastSignInDateTime) : 'Not reported'}</p></div></div></article>)}</div>}
+  </section>;
 }
 
 const accessRoleOptions: Array<[string, string]> = [

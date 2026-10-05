@@ -1,6 +1,6 @@
 import { emptyMember, initialFileProjects, initialGuidePages, initialLevels, initialMembers, initialRewards, initialWorkRecords } from './data';
 import { supabase } from './supabase';
-import type { AuditLogEntry, FileProject, FileResource, ScheduleDayCompletion, ScheduleShift, UpworkContractDraft, UpworkSnapshot, WorkspaceMember, WorkspaceState } from './types';
+import type { AuditLogEntry, EntraDevice, FileProject, FileResource, GitHubSnapshot, ScheduleDayCompletion, ScheduleShift, UpworkContractDraft, UpworkSnapshot, WorkspaceMember, WorkspaceState } from './types';
 
 const STORAGE_KEY = 'flat-reality-workspace-state';
 
@@ -50,6 +50,11 @@ function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
     lastSeenAt: member.lastSeenAt ?? '',
     passwordHash: member.passwordHash ?? '',
     scheduleEnabled: Boolean(member.scheduleEnabled),
+    githubConnected: Boolean(member.githubConnected),
+    githubUsername: member.githubUsername ?? '',
+    githubUserId: member.githubUserId ?? '',
+    githubAvatarUrl: member.githubAvatarUrl ?? '',
+    githubProfileUrl: member.githubProfileUrl ?? '',
   };
 }
 
@@ -147,6 +152,48 @@ async function callUpworkApi<T>(payload: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
+async function callGitHubApi<T>(payload: Record<string, unknown>): Promise<T> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase.functions.invoke('github-integration', { body: payload });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const responseBody = await context.json() as { error?: unknown };
+        if (typeof responseBody.error === 'string' && responseBody.error.trim()) message = responseBody.error;
+      } catch {
+        // Keep the transport error when the function did not return JSON.
+      }
+    }
+    throw new Error(message);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data as T;
+}
+
+export async function getGitHubSnapshot(sessionToken: string, memberId?: string): Promise<GitHubSnapshot> {
+  const response = await callGitHubApi<{ snapshot: GitHubSnapshot }>({ action: 'snapshot', sessionToken, memberId });
+  return response.snapshot;
+}
+
+export async function connectGitHub(sessionToken: string): Promise<void> {
+  const returnUrl = new URL(window.location.href);
+  returnUrl.search = '';
+  returnUrl.hash = '#/profile';
+  const response = await callGitHubApi<{ authorizationUrl: string }>({ action: 'connect', sessionToken, returnUrl: returnUrl.toString() });
+  window.location.assign(response.authorizationUrl);
+}
+
+export async function syncGitHubAccess(sessionToken: string, memberId?: string): Promise<GitHubSnapshot> {
+  const response = await callGitHubApi<{ snapshot: GitHubSnapshot }>({ action: 'sync_access', sessionToken, memberId });
+  return response.snapshot;
+}
+
+export async function disconnectGitHub(sessionToken: string, memberId?: string): Promise<void> {
+  await callGitHubApi({ action: 'disconnect', sessionToken, memberId });
+}
+
 export async function getUpworkSnapshot(sessionToken: string, memberId?: string, force = false): Promise<UpworkSnapshot> {
   const response = await callUpworkApi<{ snapshot: UpworkSnapshot }>({ action: 'snapshot', sessionToken, memberId, force });
   return response.snapshot;
@@ -222,6 +269,11 @@ export async function completeEntraSetup(sessionToken: string, preferredName: st
 export async function getEntraAvatar(sessionToken: string, memberId?: string): Promise<string> {
   const response = await callWorkspaceApi<{ dataUrl?: string }>({ action: 'entra_avatar', sessionToken, memberId });
   return response.dataUrl ?? '';
+}
+
+export async function getEntraDevices(sessionToken: string, memberId: string): Promise<EntraDevice[]> {
+  const response = await callWorkspaceApi<{ devices?: EntraDevice[] }>({ action: 'entra_devices', sessionToken, memberId });
+  return response.devices ?? [];
 }
 
 export async function syncEntraProfile(sessionToken: string, memberId: string): Promise<string[]> {

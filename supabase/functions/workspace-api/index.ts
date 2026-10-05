@@ -61,6 +61,9 @@ type WorkspaceMember = {
   allowLegacyLogin?: boolean;
   githubConnected?: boolean;
   githubUsername?: string;
+  githubUserId?: string;
+  githubAvatarUrl?: string;
+  githubProfileUrl?: string;
 };
 
 type WorkspaceState = {
@@ -253,6 +256,9 @@ function entraComparable(member: WorkspaceMember) {
       allowLegacyLogin: member.allowLegacyLogin !== false,
       githubConnected: Boolean(member.githubConnected),
       githubUsername: member.githubUsername || '',
+      githubUserId: member.githubUserId || '',
+      githubAvatarUrl: member.githubAvatarUrl || '',
+      githubProfileUrl: member.githubProfileUrl || '',
     },
   };
 }
@@ -730,6 +736,18 @@ Deno.serve(async (request) => {
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.byteLength > 2 * 1024 * 1024) return json({ dataUrl: '' });
       return json({ dataUrl: `data:${response.headers.get('content-type') || 'image/jpeg'};base64,${bytesToBase64(bytes)}` });
+    }
+
+    if (action === 'entra_devices') {
+      if (!context.actor.isAdmin) return json({ error: 'Admin access is required.' }, 403);
+      const memberId = String(body.memberId ?? '');
+      const target = context.state.members.find((member) => member.id === memberId);
+      const userId = String(target?.entraObjectId || target?.entraEmail || '').trim();
+      if (!target || !userId) return json({ devices: [] });
+      const graphToken = await getGraphAccessToken();
+      const fields = 'id,deviceId,displayName,operatingSystem,operatingSystemVersion,trustType,accountEnabled,isManaged,isCompliant,approximateLastSignInDateTime,registrationDateTime';
+      const payload = await graphRequest(`/users/${encodeURIComponent(userId)}/registeredDevices/microsoft.graph.device?$select=${fields}`, graphToken);
+      return json({ devices: Array.isArray(payload?.value) ? payload.value : [] });
     }
 
     if (action === 'sync_entra_profile') {
