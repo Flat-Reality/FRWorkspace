@@ -191,7 +191,6 @@ function entraComparable(member: WorkspaceMember) {
     givenName,
     surname,
     employeeId: member.employmentId,
-    employeeHireDate: member.workStartDate ? `${member.workStartDate}T00:00:00Z` : null,
     employeeType: member.contractType || null,
     jobTitle: member.jobRole || null,
     mobilePhone: member.phoneNumber || null,
@@ -243,14 +242,30 @@ async function syncMemberToEntra(member: WorkspaceMember) {
   const { extension, ...nativeFields } = mapped;
   const warnings: string[] = [];
   let synchronizedFields = 0;
+  const patchedFields = new Map<string, unknown>();
   const userPath = `/users/${encodeURIComponent(userId)}`;
 
   for (const [field, value] of Object.entries(nativeFields)) {
     try {
       await graphRequest(userPath, token, { method: 'PATCH', body: JSON.stringify({ [field]: value }) });
       synchronizedFields += 1;
+      patchedFields.set(field, value);
     } catch (error) {
       warnings.push(`${field}: ${error instanceof Error ? error.message : 'Microsoft Graph rejected the field.'}`);
+    }
+  }
+
+  if (patchedFields.size) {
+    const selectedFields = [...patchedFields.keys()];
+    const remoteProfile = await graphRequest(
+      `${userPath}?$select=${encodeURIComponent(['id', 'userPrincipalName', ...selectedFields].join(','))}`,
+      token,
+    ) as Record<string, unknown>;
+    const comparable = (value: unknown) => value == null ? '' : String(value).trim();
+    for (const [field, expected] of patchedFields) {
+      if (comparable(remoteProfile[field]) !== comparable(expected)) {
+        warnings.push(`${field}: Microsoft Graph accepted the update but read-back returned a different value.`);
+      }
     }
   }
 
@@ -292,7 +307,10 @@ async function syncChangedEntraMembers(before: WorkspaceState, after: WorkspaceS
         actor,
         target: member,
         summary: fieldWarnings.length ? `${displayName(member)} was partially synchronized with Microsoft Entra ID.` : `${displayName(member)} was synchronized with Microsoft Entra ID.`,
-        payload: fieldWarnings.length ? { warnings: fieldWarnings } : {},
+        payload: {
+          ...(fieldWarnings.length ? { warnings: fieldWarnings } : {}),
+          verifiedNativeFields: Object.keys(entraComparable(member)).filter((field) => field !== 'extension'),
+        },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Microsoft Graph synchronization failed.';
@@ -669,7 +687,10 @@ Deno.serve(async (request) => {
         actor: context.actor,
         target,
         summary: warnings.length ? `${displayName(target)} was partially synchronized with Microsoft Entra ID.` : `${displayName(target)} was synchronized with Microsoft Entra ID.`,
-        payload: warnings.length ? { warnings } : {},
+        payload: {
+          ...(warnings.length ? { warnings } : {}),
+          verifiedNativeFields: Object.keys(entraComparable(target)).filter((field) => field !== 'extension'),
+        },
       });
       return json({ ok: true, warnings });
     }
