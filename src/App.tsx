@@ -14,6 +14,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronDown,
   CircleOff,
   Clock,
   ClipboardList,
@@ -53,7 +54,7 @@ import {
 } from 'lucide-react';
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectUpwork, getEntraWorkspaceLogin, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectUpwork, getEntraAvatar, getEntraWorkspaceLogin, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -205,6 +206,16 @@ function VerifiedMark({ member, size = 'md' }: { member: WorkspaceMember; size?:
   );
 }
 
+function ProfileAvatar({ src, name, size = 'lg' }: { src?: string; name: string; size?: 'sm' | 'lg' }) {
+  const dimensions = size === 'sm' ? 'h-11 w-11' : 'h-20 w-20';
+  if (src) return <img className={`${dimensions} shrink-0 rounded-full border border-line object-cover`} src={src} alt={`${name} profile`} />;
+  return (
+    <span className={`flex ${dimensions} shrink-0 items-center justify-center rounded-full border border-line bg-mist text-zinc-400`} aria-label={`${name} profile placeholder`}>
+      <UserRound size={size === 'sm' ? 21 : 34} />
+    </span>
+  );
+}
+
 function getCurrentLevel(levels: Level[], xp: number) {
   return [...levels].sort((a, b) => b.xpRequired - a.xpRequired).find((level) => xp >= level.xpRequired) ?? levels[0];
 }
@@ -289,8 +300,8 @@ function getStoredSession() {
   }
 }
 
-function saveSession(memberId: string, token?: string, expiresAt?: string | number) {
-  window.localStorage.setItem(SESSION_KEY, JSON.stringify({ memberId, token, expiresAt: expiresAt ?? Date.now() + SESSION_DURATION_MS }));
+function saveSession(memberId: string, token?: string, expiresAt?: string | number, authMethod?: WorkspaceSession['authMethod']) {
+  window.localStorage.setItem(SESSION_KEY, JSON.stringify({ memberId, token, expiresAt: expiresAt ?? Date.now() + SESSION_DURATION_MS, authMethod }));
 }
 
 function clearSession() {
@@ -604,6 +615,7 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState('Loading workspace data...');
   const [upworkSnapshot, setUpworkSnapshot] = useState<UpworkSnapshot>(EMPTY_UPWORK_SNAPSHOT);
   const [upworkStatus, setUpworkStatus] = useState('');
+  const [entraAvatarUrl, setEntraAvatarUrl] = useState('');
 
   function applyLoadedState(state: WorkspaceState, sessionMemberId?: string | null) {
     const reconciled = reconcileWorkspace(state.members, state.workRecords);
@@ -647,7 +659,7 @@ export default function App() {
             if (response && isMounted) {
               const member = applyLoadedState(response.state, response.session.memberId);
               if (!member) throw new Error('The linked Workspace profile was not returned.');
-              saveSession(member.id, response.session.token, response.session.expiresAt);
+              saveSession(member.id, response.session.token, response.session.expiresAt, response.session.authMethod);
               window.localStorage.setItem(ENTRA_REMEMBERED_KEY, '1');
               window.sessionStorage.removeItem('flat-reality-workspace-entra-pending');
               setHasRememberedEntra(true);
@@ -729,6 +741,19 @@ export default function App() {
   }, [isLoaded, currentMemberId]);
 
   useEffect(() => {
+    const session = getStoredSession();
+    if (!session?.token || !currentMemberId || !currentMember?.entraEmail) {
+      setEntraAvatarUrl('');
+      return;
+    }
+    let active = true;
+    getEntraAvatar(session.token, currentMemberId)
+      .then((url) => { if (active) setEntraAvatarUrl(url); })
+      .catch(() => { if (active) setEntraAvatarUrl(''); });
+    return () => { active = false; };
+  }, [currentMemberId, currentMember?.entraEmail]);
+
+  useEffect(() => {
     if (!isLoaded || !currentMemberId) return;
     const url = new URL(window.location.href);
     const connected = url.searchParams.get('upwork') === 'connected';
@@ -755,14 +780,12 @@ export default function App() {
     currentMember?.status === 'suspended'
       ? [
           ['dashboard', LayoutDashboard, 'Home'],
-          ['profile', UserRound, 'Profile'],
         ]
       : [
           ['dashboard', LayoutDashboard, 'Home'],
           ...(currentMember?.scheduleEnabled ? ([['schedule', CalendarDays, 'Schedule β']] as Array<[View, LucideIcon, string]>) : []),
           ['guides', BookOpen, 'Guide'],
           ['levelup', Trophy, 'LevelUp!'],
-          ['profile', UserRound, 'Profile'],
         ];
 
   if (currentMember?.isAdmin && currentMember.status !== 'suspended') navItems.push(['admin', UsersRound, 'Admin']);
@@ -794,7 +817,7 @@ export default function App() {
         setScheduleCompletions(response.state.scheduleCompletions);
         setFileProjects(response.state.fileProjects);
         setCurrentMemberId(member.id);
-        saveSession(member.id, response.session.token, response.session.expiresAt);
+        saveSession(member.id, response.session.token, response.session.expiresAt, response.session.authMethod);
         setLoginIntroName(displayName(member));
         window.setTimeout(() => setLoginIntroName(''), 1150);
         setView('dashboard');
@@ -887,7 +910,7 @@ export default function App() {
         setScheduleCompletions(response.state.scheduleCompletions);
         setFileProjects(response.state.fileProjects);
         setCurrentMemberId(member.id);
-        saveSession(member.id, response.session.token, response.session.expiresAt);
+        saveSession(member.id, response.session.token, response.session.expiresAt, response.session.authMethod);
         setView('dashboard');
       } catch {
         setSaveStatus('Could not sign in as this user.');
@@ -1128,14 +1151,18 @@ export default function App() {
             ))}
           </nav>
 
-          <div className="mt-6 rounded-lg border border-line bg-mist p-3">
-            <p className="inline-flex items-center gap-2 text-sm font-medium">
-              {displayName(currentMember)}
-              <VerifiedMark member={currentMember} size="sm" />
-            </p>
-            <p className="mt-1 text-xs text-zinc-500">{currentMember.employmentId} · {formatEuroAmount(currentMember.withheldBalance)}</p>
-            <p className="mt-3 text-xs text-zinc-500">{saveStatus}</p>
-          </div>
+          <button className="mt-6 flex w-full items-center gap-3 rounded-lg border border-line bg-mist p-3 text-left transition hover:border-forest/35 hover:bg-forest/5" onClick={() => setView('profile')}>
+            <ProfileAvatar src={entraAvatarUrl || upworkSnapshot.profile?.photoUrl} name={displayName(currentMember)} size="sm" />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5 truncate text-sm font-semibold">
+                {displayName(currentMember)}
+                <VerifiedMark member={currentMember} size="sm" />
+              </span>
+              <span className="mt-1 block truncate text-xs text-zinc-500">{currentMember.employmentId}</span>
+            </span>
+            <ChevronDown size={16} className="shrink-0 text-zinc-400" />
+          </button>
+          <p className="mt-2 px-1 text-xs text-zinc-500">{saveStatus}</p>
 
           <button className="mt-4 flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-zinc-600 hover:bg-mist" onClick={signOut}>
             <LogOut size={17} />
@@ -1144,6 +1171,14 @@ export default function App() {
         </aside>
 
         <div className="workspace-content grid gap-6">
+          <button className="flex w-full items-center gap-3 rounded-xl border border-line bg-paper p-3 text-left shadow-soft lg:hidden" onClick={() => setView('profile')}>
+            <ProfileAvatar src={entraAvatarUrl || upworkSnapshot.profile?.photoUrl} name={displayName(currentMember)} size="sm" />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5 truncate text-sm font-semibold">{displayName(currentMember)}<VerifiedMark member={currentMember} size="sm" /></span>
+              <span className="mt-1 block text-xs text-zinc-500">{currentMember.employmentId}</span>
+            </span>
+            <ChevronDown size={17} className="text-zinc-400" />
+          </button>
           {view === 'dashboard' && (
             <Dashboard
               member={currentMember}
@@ -1157,7 +1192,7 @@ export default function App() {
               setView={setView}
             />
           )}
-          {view === 'profile' && <Profile member={currentMember} upwork={upworkSnapshot} upworkStatus={upworkStatus} refreshUpwork={() => void refreshUpwork(currentMember.id, true)} updateCurrentMember={updateCurrentMember} onLogout={signOut} />}
+          {view === 'profile' && <Profile member={currentMember} avatarUrl={entraAvatarUrl || upworkSnapshot.profile?.photoUrl || ''} records={workRecords.filter((record) => record.memberId === currentMember.id)} upwork={upworkSnapshot} upworkStatus={upworkStatus} refreshUpwork={() => void refreshUpwork(currentMember.id, true)} updateCurrentMember={updateCurrentMember} onLogout={signOut} setView={setView} />}
           {view === 'levelup' && <LevelUp member={currentMember} levels={levels} rewards={rewards} />}
           {view === 'careerGrowth' && <CareerGrowth member={currentMember} />}
           {view === 'schedule' && currentMember.scheduleEnabled && (
@@ -1564,9 +1599,12 @@ function Dashboard({
   );
 }
 
-function Profile({ member, upwork, upworkStatus, refreshUpwork, updateCurrentMember, onLogout }: { member: WorkspaceMember; upwork: UpworkSnapshot; upworkStatus: string; refreshUpwork: () => void; updateCurrentMember: (changes: Partial<WorkspaceMember>) => void; onLogout: () => void }) {
+function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwork, updateCurrentMember, onLogout, setView }: { member: WorkspaceMember; avatarUrl: string; records: WorkRecord[]; upwork: UpworkSnapshot; upworkStatus: string; refreshUpwork: () => void; updateCurrentMember: (changes: Partial<WorkspaceMember>) => void; onLogout: () => void; setView: (view: View) => void }) {
   const upworkMode = isUpworkContract(member);
   const activeUpworkContract = upwork.contracts.find((contract) => contract.status === 'Active');
+  const contractName = activeUpworkContract && upworkMode ? `${activeUpworkContract.title} (UPWORK CONTRACT)` : member.onboarding.contractType;
+  const projectIcons: Record<BenefitProgram, LucideIcon> = { 'FR Partners': UsersRound, 'The Nick': Sparkles, 'RAIN HEART': HeartPulse };
+  const recentRecord = [...records].sort((a, b) => b.date.localeCompare(a.date))[0];
   const [isUpworkBusy, setIsUpworkBusy] = useState(false);
 
   async function beginUpworkConnection() {
@@ -1594,7 +1632,30 @@ function Profile({ member, upwork, upworkStatus, refreshUpwork, updateCurrentMem
   }
 
   return (
-    <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
+    <div className="grid gap-6">
+      <section className="rounded-xl border border-line bg-paper p-5 shadow-soft sm:p-6">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+          <ProfileAvatar src={avatarUrl} name={displayName(member)} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Profile</p>
+            <h1 className="mt-2 flex items-center gap-2 text-3xl font-semibold">
+              <span className="truncate">{displayName(member)}</span>
+              <VerifiedMark member={member} />
+            </h1>
+            <p className="mt-2 text-sm text-zinc-500">{member.employmentId}</p>
+            <div className="mt-4 inline-flex items-center gap-2 rounded-lg bg-mist px-3 py-2 text-sm">
+              <BriefcaseBusiness size={16} className="text-forest" />
+              <span className="text-zinc-500">Current contract</span>
+              <span className="font-semibold">{contractName}</span>
+            </div>
+          </div>
+          <div className="grid gap-2 sm:w-auto lg:hidden">
+            <button className="h-11 rounded-lg bg-forest px-4 text-sm font-semibold text-white" type="button">Update Profile</button>
+            <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 text-sm font-semibold text-zinc-700" type="button" onClick={onLogout}><LogOut size={17} />Log Out</button>
+          </div>
+        </div>
+      </section>
+
       <VerificationCard member={member} />
       {!isIndependentPartner(member) && member.entraEmail.trim() && (
         <div className="flex flex-col gap-3 rounded-xl border border-[#71c9ee]/35 bg-[#1686c8]/5 px-4 py-3 sm:flex-row sm:items-center">
@@ -1638,24 +1699,16 @@ function Profile({ member, upwork, upworkStatus, refreshUpwork, updateCurrentMem
         </section>
       )}
 
-      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Profile</p>
-          <h1 className="mt-3 inline-flex items-center gap-2 text-3xl font-semibold">
-            {displayName(member)}
-            <VerifiedMark member={member} />
-          </h1>
-        </div>
-        <div className="grid gap-2 lg:hidden">
-          <button className="h-11 rounded-lg bg-forest px-4 text-sm font-semibold text-white" type="button">
-            Update Profile
-          </button>
-          <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-zinc-700" type="button" onClick={onLogout}>
-            <LogOut size={17} />
-            Log Out
-          </button>
-        </div>
-      </div>
+      <Section title="Your Projects">
+        {member.benefitPrograms.length ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {member.benefitPrograms.map((project) => {
+              const Icon = projectIcons[project];
+              return <div key={project} className="flex min-h-20 items-center gap-3 rounded-xl border border-line bg-paper p-4 shadow-soft"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest/10 text-forest"><Icon size={20} /></span><span className="font-semibold">{project}</span></div>;
+            })}
+          </div>
+        ) : <p className="text-sm text-zinc-500">No projects are connected to this profile yet.</p>}
+      </Section>
 
       <Section title="Workspace Information">
         <div className="grid gap-4 md:grid-cols-2">
@@ -1664,7 +1717,7 @@ function Profile({ member, upwork, upworkStatus, refreshUpwork, updateCurrentMem
           <Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateCurrentMember({ preferredName: value })} />
           <Field label="Work Start Date" value={member.workStartDate} disabled onChange={() => undefined} />
           <Field label="Account Type" value={member.contractType} disabled onChange={() => undefined} />
-          <Field label="Contracts" value={activeUpworkContract && upworkMode ? `${activeUpworkContract.title} (UPWORK CONTRACT)` : member.onboarding.contractType} disabled onChange={() => undefined} />
+          <Field label="Contracts" value={contractName} disabled onChange={() => undefined} />
           <Field label="Job Role" value={member.jobRole} disabled onChange={() => undefined} />
           <Field label="Entra ID Email" value={member.entraEmail} disabled onChange={() => undefined} />
           <Field label="Personal Email" value={member.personalEmail} disabled onChange={() => undefined} />
@@ -1674,7 +1727,6 @@ function Profile({ member, upwork, upworkStatus, refreshUpwork, updateCurrentMem
           {(isFrPartnersConnected(member) || isIndependentPartner(member)) && <Field label="Upwork Profile" value={upwork.profile?.url || member.upworkUrl} disabled={upwork.connected} onChange={(value) => updateCurrentMember({ upworkUrl: value })} />}
           {upwork.connected && <Field label="Upwork Title" value={upwork.profile?.title || ''} disabled onChange={() => undefined} />}
           {upwork.connected && <Field label="Upwork Rate" value={formatUpworkMoney(upwork.profile?.rate)} disabled onChange={() => undefined} />}
-          <Field label="Connected Workflows" value={member.benefitPrograms.join(', ') || 'None'} disabled onChange={() => undefined} />
           <Field label="Estimated Hours" value={member.estimatedHours} disabled onChange={() => undefined} />
           <Field label="Rate" value={member.rate} disabled onChange={() => undefined} />
           <Field label="Withheld Balance (€)" value={Number(member.withheldBalance ?? 0).toFixed(2)} disabled onChange={() => undefined} />
@@ -1718,6 +1770,19 @@ function Profile({ member, upwork, upworkStatus, refreshUpwork, updateCurrentMem
               </a>
             </>
           )}
+        </div>
+      </Section>
+
+      <Section title="Workspace Activity">
+        <div className="grid gap-4 md:grid-cols-2">
+          <button className="flex min-h-32 items-start gap-4 rounded-xl border border-line bg-paper p-5 text-left shadow-soft transition hover:-translate-y-0.5" onClick={() => setView('workRecords')}>
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-mist text-forest"><ClipboardList size={21} /></span>
+            <span><span className="block text-sm text-zinc-500">Work Records</span><span className="mt-1 block text-xl font-semibold">{records.length} records</span><span className="mt-2 block text-sm text-zinc-500">{recentRecord ? `Latest: ${formatDate(recentRecord.date)}` : 'No records yet'}</span></span>
+          </button>
+          <button className="flex min-h-32 items-start gap-4 rounded-xl border border-line bg-paper p-5 text-left shadow-soft transition hover:-translate-y-0.5" onClick={() => setView('careerGrowth')}>
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-mist text-forest"><TrendingUp size={21} /></span>
+            <span><span className="block text-sm text-zinc-500">Career Growth</span><span className="mt-1 block text-xl font-semibold">{member.seniority || 'Not assigned'}</span><span className="mt-2 block text-sm text-zinc-500">View your current seniority and growth information.</span></span>
+          </button>
         </div>
       </Section>
     </div>

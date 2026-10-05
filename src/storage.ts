@@ -8,6 +8,7 @@ export type WorkspaceSession = {
   token?: string;
   memberId?: string;
   expiresAt?: string | number;
+  authMethod?: 'legacy' | 'entra' | 'impersonation';
 };
 
 export const defaultWorkspaceState: WorkspaceState = {
@@ -204,6 +205,11 @@ export async function getEntraWorkspaceLogin(): Promise<{ session: WorkspaceSess
 export async function completeEntraSetup(sessionToken: string, preferredName: string): Promise<WorkspaceState> {
   const response = await callWorkspaceApi<{ state: Partial<WorkspaceState> }>({ action: 'complete_entra_setup', sessionToken, preferredName });
   return normalizeWorkspaceState(response.state);
+}
+
+export async function getEntraAvatar(sessionToken: string, memberId?: string): Promise<string> {
+  const response = await callWorkspaceApi<{ dataUrl?: string }>({ action: 'entra_avatar', sessionToken, memberId });
+  return response.dataUrl ?? '';
 }
 
 export async function signOutEntra(): Promise<void> {

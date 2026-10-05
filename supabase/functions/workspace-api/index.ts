@@ -5,6 +5,8 @@ const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const STATE_ID = 'workspace';
 const SESSION_DAYS = 90;
+const ENTRA_IDLE_HOURS = 1;
+const ENTRA_MAX_HOURS = 24;
 const AUDIT_RETENTION_DAYS = 90;
 
 const corsHeaders = {
@@ -19,10 +21,26 @@ type WorkspaceMember = {
   passwordHash?: string;
   isAdmin?: boolean;
   preferredName?: string;
+  fullName?: string;
   entraEmail?: string;
   entraObjectId?: string;
   entraSetupCompleted?: boolean;
   workEmail?: string;
+  workStartDate?: string;
+  contractType?: string;
+  addressOfResidence?: string;
+  citizenshipCountry?: string;
+  personalEmail?: string;
+  jobRole?: string;
+  estimatedHours?: string;
+  benefitPrograms?: string[];
+  strikeSystem?: number;
+  languages?: string;
+  software?: string;
+  seniority?: string;
+  rate?: string;
+  partnerStatus?: string;
+  onboarding?: Record<string, unknown>;
   phoneNumber?: string;
   timeZone?: string;
   portfolio?: string;
@@ -133,6 +151,119 @@ function validateEntraProfiles(state: WorkspaceState) {
     if (objectId) objectIds.add(objectId);
   }
   return '';
+}
+
+let graphSecrets: Record<string, string> | null = null;
+
+async function getGraphSecrets() {
+  if (graphSecrets) return graphSecrets;
+  const { data, error } = await supabase.rpc('get_entra_runtime_secrets');
+  if (error) throw error;
+  graphSecrets = (data ?? {}) as Record<string, string>;
+  return graphSecrets;
+}
+
+async function getGraphAccessToken() {
+  const secrets = await getGraphSecrets();
+  const tenantId = secrets.entra_tenant_id;
+  const clientId = secrets.entra_client_id;
+  const clientSecret = secrets.entra_client_secret;
+  if (!tenantId || !clientId || !clientSecret) throw new Error('Microsoft Graph integration is not configured.');
+  const response = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, scope: 'https://graph.microsoft.com/.default', grant_type: 'client_credentials' }),
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.access_token) throw new Error(payload.error_description || 'Microsoft Graph authorization failed.');
+  return String(payload.access_token);
+}
+
+function splitName(fullName = '') {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  return { givenName: parts[0] || undefined, surname: parts.length > 1 ? parts.slice(1).join(' ') : undefined };
+}
+
+function entraComparable(member: WorkspaceMember) {
+  const { givenName, surname } = splitName(member.fullName);
+  return {
+    displayName: member.preferredName?.trim() || member.fullName?.trim() || member.employmentId,
+    givenName,
+    surname,
+    employeeId: member.employmentId,
+    employeeHireDate: member.workStartDate ? `${member.workStartDate}T00:00:00Z` : null,
+    employeeType: member.contractType || null,
+    jobTitle: member.jobRole || null,
+    mobilePhone: member.phoneNumber || null,
+    streetAddress: member.addressOfResidence || null,
+    country: member.citizenshipCountry || null,
+    extension: {
+      employmentId: member.employmentId,
+      preferredName: member.preferredName || '',
+      personalEmail: member.personalEmail || '',
+      timeZone: member.timeZone || '',
+      portfolio: member.portfolio || '',
+      upworkUrl: member.upworkUrl || '',
+      estimatedHours: member.estimatedHours || '',
+      connectedProjects: member.benefitPrograms || [],
+      strikeSystem: Number(member.strikeSystem || 0),
+      languages: member.languages || '',
+      software: member.software || '',
+      seniority: member.seniority || '',
+      rate: member.rate || '',
+      partnerStatus: member.partnerStatus || '',
+      onboarding: member.onboarding || {},
+    },
+  };
+}
+
+async function graphRequest(path: string, token: string, init: RequestInit = {}) {
+  const response = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+  });
+  if (response.status === 204) return null;
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.error?.message || `Microsoft Graph returned ${response.status}.`);
+  return payload;
+}
+
+async function syncMemberToEntra(member: WorkspaceMember) {
+  const userId = String(member.entraObjectId || member.entraEmail || '').trim();
+  if (!userId || !isAllowedEntraEmail(member.entraEmail || '')) return;
+  const token = await getGraphAccessToken();
+  const mapped = entraComparable(member);
+  const { extension, ...nativeFields } = mapped;
+  await graphRequest(`/users/${encodeURIComponent(userId)}`, token, { method: 'PATCH', body: JSON.stringify(nativeFields) });
+  const extensionId = 'com.flatreality.workspace';
+  try {
+    await graphRequest(`/users/${encodeURIComponent(userId)}/extensions/${encodeURIComponent(extensionId)}`, token, { method: 'PATCH', body: JSON.stringify(extension) });
+  } catch (error) {
+    if (!(error instanceof Error) || !/not found|could not be found|Request_ResourceNotFound/i.test(error.message)) throw error;
+    await graphRequest(`/users/${encodeURIComponent(userId)}/extensions`, token, {
+      method: 'POST',
+      body: JSON.stringify({ '@odata.type': 'microsoft.graph.openTypeExtension', extensionName: extensionId, ...extension }),
+    });
+  }
+}
+
+async function syncChangedEntraMembers(before: WorkspaceState, after: WorkspaceState, actor: WorkspaceMember) {
+  const previous = new Map(before.members.map((member) => [member.id, member]));
+  const warnings: string[] = [];
+  for (const member of after.members) {
+    if (!member.entraEmail || member.contractType !== 'CORE TEAM') continue;
+    const oldMember = previous.get(member.id);
+    if (oldMember && JSON.stringify(entraComparable(oldMember)) === JSON.stringify(entraComparable(member))) continue;
+    try {
+      await syncMemberToEntra(member);
+      await writeAuditLog({ eventType: 'identity.entra_synced', actor, target: member, summary: `${displayName(member)} was synchronized with Microsoft Entra ID.` });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Microsoft Graph synchronization failed.';
+      warnings.push(`${displayName(member)}: ${message}`);
+      await writeAuditLog({ eventType: 'identity.entra_sync_failed', actor, target: member, summary: `Microsoft Entra sync failed for ${displayName(member)}.`, payload: { message } });
+    }
+  }
+  return warnings;
 }
 
 async function writeAuditLog({ eventType, actor, target, summary, payload = {} }: AuditEvent) {
@@ -271,21 +402,28 @@ async function setCredential(member: WorkspaceMember, passwordHash: string) {
   if (error) throw error;
 }
 
-async function createSession(member: WorkspaceMember) {
+async function createSession(member: WorkspaceMember, authMethod: 'legacy' | 'entra' | 'impersonation' = 'legacy') {
   const token = bytesToBase64(crypto.getRandomValues(new Uint8Array(32))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
   const tokenHash = await sha256Hex(token);
-  const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const { error } = await supabase.from('workspace_sessions').insert({ token_hash: tokenHash, member_id: member.id, expires_at: expiresAt });
+  const now = Date.now();
+  const expiresAt = new Date(now + (authMethod === 'entra' ? ENTRA_MAX_HOURS * 60 * 60 * 1000 : SESSION_DAYS * 24 * 60 * 60 * 1000)).toISOString();
+  const idleExpiresAt = authMethod === 'entra' ? new Date(now + ENTRA_IDLE_HOURS * 60 * 60 * 1000).toISOString() : null;
+  const { error } = await supabase.from('workspace_sessions').insert({ token_hash: tokenHash, member_id: member.id, expires_at: expiresAt, idle_expires_at: idleExpiresAt, auth_method: authMethod, last_activity_at: new Date(now).toISOString() });
   if (error) throw error;
-  return { token, memberId: member.id, expiresAt };
+  return { token, memberId: member.id, expiresAt, authMethod };
 }
 
 async function actorFromToken(token: string) {
   if (!token) return null;
   const tokenHash = await sha256Hex(token);
-  const { data, error } = await supabase.from('workspace_sessions').select('member_id, expires_at').eq('token_hash', tokenHash).maybeSingle();
+  const { data, error } = await supabase.from('workspace_sessions').select('member_id, expires_at, idle_expires_at, auth_method').eq('token_hash', tokenHash).maybeSingle();
   if (error) throw error;
-  if (!data || new Date(data.expires_at) < new Date()) return null;
+  const now = new Date();
+  if (!data || new Date(data.expires_at) < now || (data.auth_method === 'entra' && data.idle_expires_at && new Date(data.idle_expires_at) < now)) return null;
+  const nextIdle = data.auth_method === 'entra'
+    ? new Date(Math.min(Date.now() + ENTRA_IDLE_HOURS * 60 * 60 * 1000, new Date(data.expires_at).getTime())).toISOString()
+    : null;
+  await supabase.from('workspace_sessions').update({ last_activity_at: now.toISOString(), idle_expires_at: nextIdle }).eq('token_hash', tokenHash);
   const state = await loadState();
   const actor = state.members.find((member) => member.id === data.member_id);
   return actor ? { actor, state } : null;
@@ -410,7 +548,7 @@ Deno.serve(async (request) => {
       const { error: stateError } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state, updated_at: new Date().toISOString() });
       if (stateError) throw stateError;
 
-      const session = await createSession(linkedMember);
+      const session = await createSession(linkedMember, 'entra');
       state = await touchMemberLastSeen(state, linkedMember.id);
       if (!wasLinked) {
         await writeAuditLog({ eventType: 'identity.entra_linked', actor: linkedMember, target: linkedMember, summary: `${displayName(linkedMember)} linked a Microsoft Entra identity.` });
@@ -458,8 +596,29 @@ Deno.serve(async (request) => {
       };
       const { error } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state: nextState, updated_at: new Date().toISOString() });
       if (error) throw error;
+      await syncMemberToEntra(nextMember).catch(async (syncError) => {
+        await writeAuditLog({ eventType: 'identity.entra_sync_failed', actor: nextMember, target: nextMember, summary: `Microsoft Entra sync failed for ${displayName(nextMember)}.`, payload: { message: syncError instanceof Error ? syncError.message : 'Microsoft Graph synchronization failed.' } });
+      });
       await writeAuditLog({ eventType: 'identity.entra_setup_completed', actor: nextMember, target: nextMember, summary: `${displayName(nextMember)} completed Microsoft Entra account linking.` });
       return json({ state: scrubState(nextState, nextMember) });
+    }
+
+    if (action === 'entra_avatar') {
+      const memberId = String(body.memberId ?? context.actor.id);
+      if (memberId !== context.actor.id && !context.actor.isAdmin) return json({ error: 'Admin access is required.' }, 403);
+      const target = context.state.members.find((member) => member.id === memberId);
+      const userId = String(target?.entraObjectId || target?.entraEmail || '').trim();
+      if (!target || !userId) return json({ dataUrl: '' });
+      const graphToken = await getGraphAccessToken();
+      const response = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(userId)}/photo/$value`, { headers: { Authorization: `Bearer ${graphToken}` } });
+      if (response.status === 404) return json({ dataUrl: '' });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error?.message || 'Microsoft profile photo could not be loaded.');
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength > 2 * 1024 * 1024) return json({ dataUrl: '' });
+      return json({ dataUrl: `data:${response.headers.get('content-type') || 'image/jpeg'};base64,${bytesToBase64(bytes)}` });
     }
 
     if (action === 'load') {
@@ -482,7 +641,7 @@ Deno.serve(async (request) => {
       const memberId = String(body.memberId ?? '');
       const target = context.state.members.find((member) => member.id === memberId);
       if (!target) return json({ error: 'User was not found.' }, 404);
-      const session = await createSession(target);
+      const session = await createSession(target, 'impersonation');
       const state = await touchMemberLastSeen(context.state, target.id);
       await writeAuditLog({ eventType: 'session.impersonate', actor: context.actor, target, summary: `${displayName(context.actor)} signed in as ${displayName(target)}.` });
       return json({ session, state: scrubState(state, target) });
@@ -521,7 +680,8 @@ Deno.serve(async (request) => {
       const { error } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state: nextState, updated_at: new Date().toISOString() });
       if (error) throw error;
       await auditStateChanges(context.state, nextState, context.actor);
-      return json({ state: scrubState(nextState, context.actor) });
+      const entraSyncWarnings = context.actor.isAdmin ? await syncChangedEntraMembers(context.state, nextState, context.actor) : [];
+      return json({ state: scrubState(nextState, context.actor), entraSyncWarnings });
     }
 
     return json({ error: 'Unknown action.' }, 400);
