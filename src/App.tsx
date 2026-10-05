@@ -832,6 +832,10 @@ export default function App() {
 
   if (currentMember?.isAdmin && currentMember.status !== 'suspended') navItems.push(['admin', UsersRound, 'Admin']);
 
+  const mobileNavItems = [...navItems];
+  const mobileAdminIndex = mobileNavItems.findIndex(([key]) => key === 'admin');
+  mobileNavItems.splice(mobileAdminIndex === -1 ? mobileNavItems.length : mobileAdminIndex, 0, ['profile', UserRound, 'Profile']);
+
   function updateMembers(nextMembers: WorkspaceMember[], nextRecords = workRecords) {
     const reconciled = reconcileWorkspace(nextMembers, nextRecords);
     setMembers(reconciled.members);
@@ -1213,14 +1217,6 @@ export default function App() {
         </aside>
 
         <div className="workspace-content grid gap-6">
-          <button className="flex w-full items-center gap-3 rounded-xl border border-line bg-paper p-3 text-left shadow-soft lg:hidden" onClick={() => setView('profile')}>
-            <ProfileAvatar src={entraAvatarUrl || upworkSnapshot.profile?.photoUrl} name={displayName(currentMember)} size="sm" />
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-1.5 truncate text-sm font-semibold">{displayName(currentMember)}<VerifiedMark member={currentMember} size="sm" /></span>
-              <span className="mt-1 block text-xs text-zinc-500">{currentMember.employmentId}</span>
-            </span>
-            <ChevronDown size={17} className="text-zinc-400" />
-          </button>
           {view === 'dashboard' && (
             <Dashboard
               member={currentMember}
@@ -1273,7 +1269,7 @@ export default function App() {
         </div>
       </div>
       <nav className="mobile-tabbar fixed inset-x-0 bottom-0 z-40 grid grid-flow-col auto-cols-fr gap-1 rounded-t-[24px] border-x-0 border-b-0 border-t border-line bg-paper/95 px-2 pt-2 shadow-soft backdrop-blur lg:hidden">
-        {navItems.map(([key, Icon, label]) => (
+        {mobileNavItems.map(([key, Icon, label]) => (
           <button
             key={key}
             className={`grid min-h-[58px] place-items-center gap-1 rounded-[18px] px-2 text-[11px] font-medium transition ${

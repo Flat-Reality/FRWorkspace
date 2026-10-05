@@ -193,6 +193,7 @@ function entraComparable(member: WorkspaceMember) {
     employeeId: member.employmentId,
     employeeType: member.contractType || null,
     jobTitle: member.jobRole || null,
+    mail: member.entraEmail,
     mobilePhone: member.phoneNumber || null,
     streetAddress: member.addressOfResidence || null,
     country: member.citizenshipCountry || null,
