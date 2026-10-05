@@ -191,10 +191,15 @@ async function synchronizeAccess(member: WorkspaceMember, profile: { id: number;
   const secrets = await getSecrets();
   const organization = secrets.github_organization || 'Flat-Reality';
   const token = await installationToken();
-  const membership = await githubRequest<{ state?: string }>(`/orgs/${encodeURIComponent(organization)}/memberships/${encodeURIComponent(profile.login)}`, token, {
-    method: 'PUT',
-    body: JSON.stringify({ role: 'member' }),
-  });
+  let membership: { state?: string; role?: string };
+  try {
+    membership = await githubRequest<{ state?: string; role?: string }>(`/orgs/${encodeURIComponent(organization)}/memberships/${encodeURIComponent(profile.login)}`, token);
+  } catch {
+    membership = await githubRequest<{ state?: string; role?: string }>(`/orgs/${encodeURIComponent(organization)}/memberships/${encodeURIComponent(profile.login)}`, token, {
+      method: 'PUT',
+      body: JSON.stringify({ role: 'member' }),
+    });
+  }
   const membershipState = membership.state === 'active' ? 'active' : 'pending';
   const teamSlugs = await projectTeamSlugs(member);
   const warnings: string[] = [];
