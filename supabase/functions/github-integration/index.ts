@@ -94,13 +94,10 @@ async function audit(eventType: string, actor: WorkspaceMember, summary: string,
   });
 }
 
-let runtimeSecrets: GitHubSecrets | null = null;
 async function getSecrets() {
-  if (runtimeSecrets) return runtimeSecrets;
   const { data, error } = await supabase.rpc('get_github_runtime_secrets');
   if (error) throw error;
-  runtimeSecrets = (data ?? {}) as GitHubSecrets;
-  return runtimeSecrets;
+  return (data ?? {}) as GitHubSecrets;
 }
 
 function derLength(length: number) {
