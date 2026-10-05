@@ -199,8 +199,15 @@ function entraComparable(member: WorkspaceMember) {
     country: member.citizenshipCountry || null,
     extension: {
       employmentId: member.employmentId,
+      fullName: member.fullName || '',
       preferredName: member.preferredName || '',
+      workStartDate: member.workStartDate || '',
+      accountType: member.contractType || '',
+      addressOfResidence: member.addressOfResidence || '',
+      citizenshipCountry: member.citizenshipCountry || '',
       personalEmail: member.personalEmail || '',
+      jobRole: member.jobRole || '',
+      phoneNumber: member.phoneNumber || '',
       timeZone: member.timeZone || '',
       portfolio: member.portfolio || '',
       upworkUrl: member.upworkUrl || '',
@@ -234,17 +241,41 @@ async function syncMemberToEntra(member: WorkspaceMember) {
   const token = await getGraphAccessToken();
   const mapped = entraComparable(member);
   const { extension, ...nativeFields } = mapped;
-  await graphRequest(`/users/${encodeURIComponent(userId)}`, token, { method: 'PATCH', body: JSON.stringify(nativeFields) });
+  const warnings: string[] = [];
+  let synchronizedFields = 0;
+  const userPath = `/users/${encodeURIComponent(userId)}`;
+
+  for (const [field, value] of Object.entries(nativeFields)) {
+    try {
+      await graphRequest(userPath, token, { method: 'PATCH', body: JSON.stringify({ [field]: value }) });
+      synchronizedFields += 1;
+    } catch (error) {
+      warnings.push(`${field}: ${error instanceof Error ? error.message : 'Microsoft Graph rejected the field.'}`);
+    }
+  }
+
   const extensionId = 'com.flatreality.workspace';
   try {
-    await graphRequest(`/users/${encodeURIComponent(userId)}/extensions/${encodeURIComponent(extensionId)}`, token, { method: 'PATCH', body: JSON.stringify(extension) });
+    await graphRequest(`${userPath}/extensions/${encodeURIComponent(extensionId)}`, token, { method: 'PATCH', body: JSON.stringify(extension) });
+    synchronizedFields += 1;
   } catch (error) {
-    if (!(error instanceof Error) || !/not found|could not be found|Request_ResourceNotFound/i.test(error.message)) throw error;
-    await graphRequest(`/users/${encodeURIComponent(userId)}/extensions`, token, {
-      method: 'POST',
-      body: JSON.stringify({ '@odata.type': 'microsoft.graph.openTypeExtension', extensionName: extensionId, ...extension }),
-    });
+    if (error instanceof Error && /not found|could not be found|Request_ResourceNotFound/i.test(error.message)) {
+      try {
+        await graphRequest(`${userPath}/extensions`, token, {
+          method: 'POST',
+          body: JSON.stringify({ '@odata.type': 'microsoft.graph.openTypeExtension', extensionName: extensionId, ...extension }),
+        });
+        synchronizedFields += 1;
+      } catch (createError) {
+        warnings.push(`Workspace HR extension: ${createError instanceof Error ? createError.message : 'Microsoft Graph rejected the extension.'}`);
+      }
+    } else {
+      warnings.push(`Workspace HR extension: ${error instanceof Error ? error.message : 'Microsoft Graph rejected the extension.'}`);
+    }
   }
+
+  if (!synchronizedFields) throw new Error(warnings.join(' | ') || 'Microsoft Graph rejected all profile fields.');
+  return warnings;
 }
 
 async function syncChangedEntraMembers(before: WorkspaceState, after: WorkspaceState, actor: WorkspaceMember) {
@@ -255,8 +286,14 @@ async function syncChangedEntraMembers(before: WorkspaceState, after: WorkspaceS
     const oldMember = previous.get(member.id);
     if (oldMember && JSON.stringify(entraComparable(oldMember)) === JSON.stringify(entraComparable(member))) continue;
     try {
-      await syncMemberToEntra(member);
-      await writeAuditLog({ eventType: 'identity.entra_synced', actor, target: member, summary: `${displayName(member)} was synchronized with Microsoft Entra ID.` });
+      const fieldWarnings = await syncMemberToEntra(member);
+      await writeAuditLog({
+        eventType: fieldWarnings.length ? 'identity.entra_sync_partial' : 'identity.entra_synced',
+        actor,
+        target: member,
+        summary: fieldWarnings.length ? `${displayName(member)} was partially synchronized with Microsoft Entra ID.` : `${displayName(member)} was synchronized with Microsoft Entra ID.`,
+        payload: fieldWarnings.length ? { warnings: fieldWarnings } : {},
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Microsoft Graph synchronization failed.';
       warnings.push(`${displayName(member)}: ${message}`);
@@ -619,6 +656,22 @@ Deno.serve(async (request) => {
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.byteLength > 2 * 1024 * 1024) return json({ dataUrl: '' });
       return json({ dataUrl: `data:${response.headers.get('content-type') || 'image/jpeg'};base64,${bytesToBase64(bytes)}` });
+    }
+
+    if (action === 'sync_entra_profile') {
+      if (!context.actor.isAdmin) return json({ error: 'Admin access is required.' }, 403);
+      const memberId = String(body.memberId ?? '');
+      const target = context.state.members.find((member) => member.id === memberId);
+      if (!target?.entraEmail) return json({ error: 'This profile does not have an Entra ID email.' }, 400);
+      const warnings = await syncMemberToEntra(target);
+      await writeAuditLog({
+        eventType: warnings.length ? 'identity.entra_sync_partial' : 'identity.entra_synced',
+        actor: context.actor,
+        target,
+        summary: warnings.length ? `${displayName(target)} was partially synchronized with Microsoft Entra ID.` : `${displayName(target)} was synchronized with Microsoft Entra ID.`,
+        payload: warnings.length ? { warnings } : {},
+      });
+      return json({ ok: true, warnings });
     }
 
     if (action === 'load') {

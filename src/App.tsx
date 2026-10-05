@@ -54,7 +54,7 @@ import {
 } from 'lucide-react';
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectUpwork, getEntraAvatar, getEntraWorkspaceLogin, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectUpwork, getEntraAvatar, getEntraWorkspaceLogin, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin, syncEntraProfile } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -195,6 +195,36 @@ function isUpworkContract(member: WorkspaceMember) {
 
 function isFrPartnersConnected(member: WorkspaceMember) {
   return member.benefitPrograms.includes('FR Partners');
+}
+
+function calculatePartnerQualityIndex(member: WorkspaceMember, snapshot: UpworkSnapshot) {
+  const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
+  const strikes = clamp(Number(member.strikeSystem) || 0, 0, 3);
+  const reliabilityScore = [35, 24, 10, 0][strikes];
+  const completedTasks = Math.max(0, Number(member.completedTasks) || 0);
+  const deliveryScore = 25 * (1 - Math.exp(-completedTasks / 8));
+
+  const startedAt = member.workStartDate ? new Date(`${member.workStartDate}T00:00:00`) : null;
+  const tenureMonths = startedAt && !Number.isNaN(startedAt.getTime())
+    ? Math.max(0, (Date.now() - startedAt.getTime()) / (1000 * 60 * 60 * 24 * 30.4375))
+    : 0;
+  const tenureScore = 15 * clamp(tenureMonths / 12, 0, 1);
+
+  const profileSignals = [member.jobRole, member.seniority, member.timeZone, member.portfolio, member.rate];
+  const profileScore = 15 * (profileSignals.filter((value) => String(value ?? '').trim()).length / profileSignals.length);
+
+  const closedContracts = snapshot.contracts.filter((contract) => contract.status === 'Closed').length;
+  const hasActiveContract = snapshot.contracts.some((contract) => contract.status === 'Active');
+  const trackedHours = snapshot.timeEntries.reduce((total, entry) => total + Math.max(0, entry.hours), 0);
+  const platformScore = snapshot.connected
+    ? 3 + Math.min(4, closedContracts * 2) + (hasActiveContract ? 1 : 0) + Math.min(2, trackedHours / 20)
+    : 0;
+
+  return Math.round(clamp(reliabilityScore + deliveryScore + tenureScore + profileScore + platformScore, 0, 100));
+}
+
+function partnerStatusPriority(status: PartnerStatus) {
+  return ({ available: 0, working_hours: 1, inactive: 2 } as Record<PartnerStatus, number>)[status] ?? 3;
 }
 
 function VerifiedMark({ member, size = 'md' }: { member: WorkspaceMember; size?: 'sm' | 'md' }) {
@@ -501,14 +531,16 @@ function EntraEmailField({ value, onChange, disabled = false }: { value: string;
     <label className="grid gap-2">
       <span className="text-sm font-medium text-zinc-600">Entra ID Email</span>
       <input
-        className={`h-11 rounded-lg border bg-white px-3 text-sm outline-none transition disabled:bg-mist disabled:text-zinc-500 ${invalid ? 'border-red-500 focus:ring-4 focus:ring-red-500/10' : 'border-line focus:border-forest focus:ring-4 focus:ring-forest/10'}`}
+        className={`h-11 rounded-lg border px-3 text-sm outline-none transition ${disabled ? 'border-[#71c9ee]/45 bg-[#1686c8]/10 font-medium text-[#1686c8]' : 'bg-white'} ${invalid ? 'border-red-500 focus:ring-4 focus:ring-red-500/10' : 'border-line focus:border-forest focus:ring-4 focus:ring-forest/10'}`}
         type="email"
         value={draft}
         disabled={disabled}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
       />
-      {!disabled && (
+      {disabled ? (
+        <span className="text-xs font-medium text-[#1686c8]">Locked after the first successful Entra ID sign-in.</span>
+      ) : (
         <span className={`text-xs ${invalid ? 'text-red-600' : 'text-zinc-500'}`}>
           Use @flatreality.eu or @flatrealitycompany.onmicrosoft.com.
         </span>
@@ -652,16 +684,25 @@ export default function App() {
           }
         }
 
-        const isEntraCallback = window.sessionStorage.getItem('flat-reality-workspace-entra-pending') === '1';
+        const callbackQuery = new URLSearchParams(window.location.search);
+        const callbackHash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        const isEntraCallback = window.sessionStorage.getItem('flat-reality-workspace-entra-pending') === '1'
+          || window.localStorage.getItem('flat-reality-workspace-entra-pending') === '1'
+          || callbackQuery.has('code')
+          || callbackQuery.has('error')
+          || callbackHash.has('access_token')
+          || callbackHash.has('error');
         if (isSupabaseConfigured && isEntraCallback) {
           try {
             const response = await getEntraWorkspaceLogin();
+            if (!response) throw new Error('Microsoft sign-in returned without an authenticated session. Please try again.');
             if (response && isMounted) {
               const member = applyLoadedState(response.state, response.session.memberId);
               if (!member) throw new Error('The linked Workspace profile was not returned.');
               saveSession(member.id, response.session.token, response.session.expiresAt, response.session.authMethod);
               window.localStorage.setItem(ENTRA_REMEMBERED_KEY, '1');
               window.sessionStorage.removeItem('flat-reality-workspace-entra-pending');
+              window.localStorage.removeItem('flat-reality-workspace-entra-pending');
               setHasRememberedEntra(true);
               if (response.firstLink) {
                 setEntraSetupMemberId(member.id);
@@ -679,6 +720,7 @@ export default function App() {
             }
           } catch (error) {
             window.sessionStorage.removeItem('flat-reality-workspace-entra-pending');
+            window.localStorage.removeItem('flat-reality-workspace-entra-pending');
             await signOutEntra().catch(() => undefined);
             if (isMounted) setLoginError(error instanceof Error ? error.message : 'Microsoft sign-in could not be completed.');
           }
@@ -1632,9 +1674,9 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
   }
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5 pb-8">
       <section className="rounded-xl border border-line bg-paper p-5 shadow-soft sm:p-6">
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-5">
           <ProfileAvatar src={avatarUrl} name={displayName(member)} />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Profile</p>
@@ -1643,7 +1685,7 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
               <VerifiedMark member={member} />
             </h1>
             <p className="mt-2 text-sm text-zinc-500">{member.employmentId}</p>
-            <div className="mt-4 inline-flex items-center gap-2 rounded-lg bg-mist px-3 py-2 text-sm">
+            <div className="mt-3 inline-flex max-w-full flex-wrap items-center gap-2 rounded-lg bg-mist px-3 py-2 text-sm">
               <BriefcaseBusiness size={16} className="text-forest" />
               <span className="text-zinc-500">Current contract</span>
               <span className="font-semibold">{contractName}</span>
@@ -3064,6 +3106,20 @@ function MemberEditor({
 }
 
 function AdminProfileTab({ member, updateMember, setMembers, impersonateMember, resetMemberPassword }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; impersonateMember: (memberId: string) => void | Promise<void>; resetMemberPassword: (memberId: string) => void | Promise<void> }) {
+  const [entraSyncStatus, setEntraSyncStatus] = useState('');
+
+  async function synchronizeEntraProfile() {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    setEntraSyncStatus('Synchronizing...');
+    try {
+      const warnings = await syncEntraProfile(token, member.id);
+      setEntraSyncStatus(warnings.length ? `Synchronized with ${warnings.length} restricted field${warnings.length === 1 ? '' : 's'}. Details are available in Logs.` : 'Entra ID profile synchronized.');
+    } catch (error) {
+      setEntraSyncStatus(error instanceof Error ? error.message : 'Entra ID synchronization failed.');
+    }
+  }
+
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <Section title="Profile">
@@ -3077,7 +3133,7 @@ function AdminProfileTab({ member, updateMember, setMembers, impersonateMember, 
           <Field label="Citizenship Country" value={member.citizenshipCountry} onChange={(value) => updateMember({ citizenshipCountry: value })} />
           <Field label="Personal Email" value={member.personalEmail} onChange={(value) => updateMember({ personalEmail: value })} />
           <Field label="Job Role" value={member.jobRole} onChange={(value) => updateMember({ jobRole: value })} />
-          <EntraEmailField value={member.entraEmail} onChange={(value) => updateMember({ entraEmail: value })} />
+          <EntraEmailField value={member.entraEmail} disabled={member.entraSetupCompleted} onChange={(value) => updateMember({ entraEmail: value })} />
           {member.entraObjectId && <Field label="Entra Object ID" value={member.entraObjectId} disabled onChange={() => undefined} />}
           <Field label="Estimated Hours" value={member.estimatedHours} onChange={(value) => updateMember({ estimatedHours: value })} />
           <Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateMember({ phoneNumber: value })} />
@@ -3107,6 +3163,12 @@ function AdminProfileTab({ member, updateMember, setMembers, impersonateMember, 
       </Section>
       <Section title="Debug">
         <div className="flex flex-wrap gap-3">
+          {member.entraEmail && (
+            <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#1686c8] px-3 text-sm font-medium text-white" onClick={() => void synchronizeEntraProfile()}>
+              <RefreshCw size={16} />
+              Sync Entra ID
+            </button>
+          )}
           <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-zinc-700" onClick={() => void resetMemberPassword(member.id)}>
             <RotateCcw size={16} />
             Reset Password
@@ -3116,6 +3178,7 @@ function AdminProfileTab({ member, updateMember, setMembers, impersonateMember, 
             Sign In As This User
           </button>
         </div>
+        {entraSyncStatus && <p className="text-sm text-zinc-600">{entraSyncStatus}</p>}
       </Section>
       <button className="justify-self-start rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600" onClick={() => setMembers((items) => items.filter((item) => item.id !== member.id))}>
         Delete User
@@ -3567,6 +3630,15 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
     });
   }
 
+  const rankedPartners = partnerMembers
+    .map((member) => {
+      const snapshot = snapshots[member.id] ?? EMPTY_UPWORK_SNAPSHOT;
+      const activeContract = snapshot.contracts.find((contract) => contract.status === 'Active');
+      const effectiveStatus: PartnerStatus = activeContract ? 'working_hours' : member.partnerStatus;
+      return { member, snapshot, activeContract, effectiveStatus, qualityIndex: calculatePartnerQualityIndex(member, snapshot) };
+    })
+    .sort((left, right) => right.qualityIndex - left.qualityIndex || partnerStatusPriority(left.effectiveStatus) - partnerStatusPriority(right.effectiveStatus) || displayName(left.member).localeCompare(displayName(right.member)));
+
   return (
     <div className="grid gap-5">
       <BackButton onBack={onBack} />
@@ -3594,10 +3666,8 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
             </tr>
           </thead>
           <tbody>
-            {partnerMembers.map((member) => {
-              const snapshot = snapshots[member.id] ?? EMPTY_UPWORK_SNAPSHOT;
-              const activeContract = snapshot.contracts.find((contract) => contract.status === 'Active');
-              const effectiveMember = activeContract ? { ...member, partnerStatus: 'working_hours' as PartnerStatus } : member;
+            {rankedPartners.map(({ member, snapshot, activeContract, effectiveStatus, qualityIndex }) => {
+              const effectiveMember = { ...member, partnerStatus: effectiveStatus };
               return (
                 <tr key={member.id} className="border-b border-line align-middle">
                   <td className="px-3 py-3 font-medium">
@@ -3618,8 +3688,9 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
                   <td className="px-3 py-3">{activeContract ? activeContract.title : '—'}</td>
                   <td className="px-3 py-3">{formatPlannerTime(snapshot.timeEntries.reduce((total, entry) => total + entry.hours, 0))}</td>
                   <td className="px-3 py-3">
-                    <input className="h-10 w-20 rounded-lg border border-line bg-white px-2 text-sm outline-none" type="number" value={member.partnerIndex} onChange={(event) => updatePartner(member.id, { partnerIndex: Number(event.target.value) })} />
-                    <span className="ml-1 text-zinc-500">%</span>
+                    <span className="inline-flex min-w-16 items-center justify-center rounded-full bg-forest/10 px-3 py-1.5 font-semibold text-forest" title="Calculated from reliability, completed work, tenure, profile readiness and verified Upwork activity.">
+                      {qualityIndex}%
+                    </span>
                   </td>
                   <td className="px-3 py-3">
                     <input className="h-10 w-20 rounded-lg border border-line bg-white px-2 text-sm outline-none" type="number" value={member.completedTasks} onChange={(event) => updatePartner(member.id, { completedTasks: Number(event.target.value) })} />

@@ -177,27 +177,39 @@ export async function loginWorkspace(employmentId: string, password: string): Pr
 export async function startEntraLogin(): Promise<void> {
   if (!supabase) throw new Error('Supabase is not configured.');
   window.sessionStorage.setItem('flat-reality-workspace-entra-pending', '1');
+  window.localStorage.setItem('flat-reality-workspace-entra-pending', '1');
   const redirectUrl = new URL(window.location.href);
   redirectUrl.search = '';
   redirectUrl.hash = '';
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'azure',
     options: {
-      scopes: 'email openid profile',
+      scopes: 'email',
       redirectTo: redirectUrl.toString(),
     },
   });
   if (error) {
     window.sessionStorage.removeItem('flat-reality-workspace-entra-pending');
+    window.localStorage.removeItem('flat-reality-workspace-entra-pending');
     throw error;
   }
 }
 
+async function waitForEntraAuthSession() {
+  if (!supabase) return null;
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    if (data.session?.access_token) return data.session;
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+  return null;
+}
+
 export async function getEntraWorkspaceLogin(): Promise<{ session: WorkspaceSession; state: WorkspaceState; firstLink: boolean } | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-  if (!data.session?.access_token) return null;
+  const session = await waitForEntraAuthSession();
+  if (!session?.access_token) return null;
   const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState>; firstLink?: boolean }>({ action: 'entra_login' });
   return { session: response.session, state: normalizeWorkspaceState(response.state), firstLink: Boolean(response.firstLink) };
 }
@@ -210,6 +222,11 @@ export async function completeEntraSetup(sessionToken: string, preferredName: st
 export async function getEntraAvatar(sessionToken: string, memberId?: string): Promise<string> {
   const response = await callWorkspaceApi<{ dataUrl?: string }>({ action: 'entra_avatar', sessionToken, memberId });
   return response.dataUrl ?? '';
+}
+
+export async function syncEntraProfile(sessionToken: string, memberId: string): Promise<string[]> {
+  const response = await callWorkspaceApi<{ warnings?: string[] }>({ action: 'sync_entra_profile', sessionToken, memberId });
+  return response.warnings ?? [];
 }
 
 export async function signOutEntra(): Promise<void> {
