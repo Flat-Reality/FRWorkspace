@@ -575,9 +575,30 @@ Deno.serve(async (request) => {
       const userMetadata = (authUser.user_metadata ?? {}) as Record<string, unknown>;
       const identityClaims = (identityData.custom_claims ?? {}) as Record<string, unknown>;
       const userClaims = (userMetadata.custom_claims ?? {}) as Record<string, unknown>;
-      const entraObjectId = String(
-        identityData.oid ?? identityClaims.oid ?? userMetadata.oid ?? userClaims.oid ?? azureIdentity?.provider_id ?? '',
+      let entraObjectId = String(
+        identityData.oid ?? identityClaims.oid ?? userMetadata.oid ?? userClaims.oid ?? '',
       ).trim();
+      if (!entraObjectId) {
+        const graphToken = await getGraphAccessToken();
+        const graphUserResponse = await fetch(
+          `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(entraEmail)}?$select=id`,
+          { headers: { Authorization: `Bearer ${graphToken}` } },
+        );
+        if (graphUserResponse.ok) {
+          const graphUser = await graphUserResponse.json().catch(() => ({}));
+          entraObjectId = String(graphUser?.id ?? '').trim();
+        }
+      }
+      if (!entraObjectId) {
+        entraObjectId = String(
+          identityData.provider_id
+            ?? userMetadata.provider_id
+            ?? identityData.sub
+            ?? userMetadata.sub
+            ?? azureIdentity?.provider_id
+            ?? '',
+        ).trim();
+      }
       if (!entraObjectId) return json({ error: 'Microsoft did not return a stable Entra identity.' }, 403);
 
       let state = await loadState();
