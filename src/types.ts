@@ -114,10 +114,16 @@ export type WorkspaceMember = {
   workStartDate: string;
   contractType: ContractType;
   addressOfResidence: string;
+  addressStreet?: string;
+  addressCity?: string;
+  addressState?: string;
+  addressPostalCode?: string;
+  addressCountry?: string;
   citizenshipCountry: string;
   iban: string;
   withheldBalance: number;
   personalEmail: string;
+  slackTag?: string;
   jobRole: string;
   entraEmail: string;
   entraObjectId: string;
@@ -136,6 +142,16 @@ export type WorkspaceMember = {
   languages: string;
   software: string;
   seniority: string;
+  employmentIdExpiresAt?: string;
+  skills?: string[];
+  endorsedSkills?: string[];
+  permissions?: string[];
+  permissionDetails?: string[];
+  upworkRequired?: boolean;
+  allowLegacyLogin?: boolean;
+  githubConnected?: boolean;
+  githubUsername?: string;
+  pendingUpworkContract?: Omit<UpworkContractDraft, 'memberId'>;
   onboarding: {
     gdprSigned: boolean;
     gdprUrl: string;

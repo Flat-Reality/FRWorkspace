@@ -29,8 +29,14 @@ type WorkspaceMember = {
   workStartDate?: string;
   contractType?: string;
   addressOfResidence?: string;
+  addressStreet?: string;
+  addressCity?: string;
+  addressState?: string;
+  addressPostalCode?: string;
+  addressCountry?: string;
   citizenshipCountry?: string;
   personalEmail?: string;
+  slackTag?: string;
   jobRole?: string;
   estimatedHours?: string;
   benefitPrograms?: string[];
@@ -46,6 +52,15 @@ type WorkspaceMember = {
   portfolio?: string;
   upworkUrl?: string;
   lastSeenAt?: string;
+  employmentIdExpiresAt?: string;
+  skills?: string[];
+  endorsedSkills?: string[];
+  permissions?: string[];
+  permissionDetails?: string[];
+  upworkRequired?: boolean;
+  allowLegacyLogin?: boolean;
+  githubConnected?: boolean;
+  githubUsername?: string;
 };
 
 type WorkspaceState = {
@@ -195,8 +210,11 @@ function entraComparable(member: WorkspaceMember) {
     jobTitle: member.jobRole || null,
     mail: member.entraEmail,
     mobilePhone: member.phoneNumber || null,
-    streetAddress: member.addressOfResidence || null,
-    country: member.citizenshipCountry || null,
+    streetAddress: member.addressStreet || member.addressOfResidence || null,
+    city: member.addressCity || null,
+    state: member.addressState || null,
+    postalCode: member.addressPostalCode || null,
+    country: member.addressCountry || member.citizenshipCountry || null,
     extension: {
       employmentId: member.employmentId,
       fullName: member.fullName || '',
@@ -204,8 +222,14 @@ function entraComparable(member: WorkspaceMember) {
       workStartDate: member.workStartDate || '',
       accountType: member.contractType || '',
       addressOfResidence: member.addressOfResidence || '',
+      addressStreet: member.addressStreet || '',
+      addressCity: member.addressCity || '',
+      addressState: member.addressState || '',
+      addressPostalCode: member.addressPostalCode || '',
+      addressCountry: member.addressCountry || '',
       citizenshipCountry: member.citizenshipCountry || '',
       personalEmail: member.personalEmail || '',
+      slackTag: member.slackTag || '',
       jobRole: member.jobRole || '',
       phoneNumber: member.phoneNumber || '',
       timeZone: member.timeZone || '',
@@ -220,6 +244,15 @@ function entraComparable(member: WorkspaceMember) {
       rate: member.rate || '',
       partnerStatus: member.partnerStatus || '',
       onboarding: member.onboarding || {},
+      employmentIdExpiresAt: member.employmentIdExpiresAt || '',
+      skills: member.skills || [],
+      endorsedSkills: member.endorsedSkills || [],
+      permissions: member.permissions || [],
+      permissionDetails: member.permissionDetails || [],
+      upworkRequired: Boolean(member.upworkRequired),
+      allowLegacyLogin: member.allowLegacyLogin !== false,
+      githubConnected: Boolean(member.githubConnected),
+      githubUsername: member.githubUsername || '',
     },
   };
 }
@@ -298,7 +331,7 @@ async function syncChangedEntraMembers(before: WorkspaceState, after: WorkspaceS
   const previous = new Map(before.members.map((member) => [member.id, member]));
   const warnings: string[] = [];
   for (const member of after.members) {
-    if (!member.entraEmail || member.contractType !== 'CORE TEAM') continue;
+    if (!member.entraEmail) continue;
     const oldMember = previous.get(member.id);
     if (oldMember && JSON.stringify(entraComparable(oldMember)) === JSON.stringify(entraComparable(member))) continue;
     try {
@@ -541,6 +574,7 @@ Deno.serve(async (request) => {
       const password = String(body.password ?? '');
       const member = state.members.find((item) => item.employmentId.toLowerCase() === employmentId);
       if (!member) return json({ error: 'Employment ID or password is incorrect.' }, 401);
+      if (member.allowLegacyLogin === false) return json({ error: 'Legacy sign-in is disabled for this account. Use Microsoft Entra ID.' }, 403);
       const storedHash = await getCredential(member);
       if (!storedHash) return json({ error: 'Password is not set. Use recovery options to create one.' }, 401);
       const passwordCheck = await verifyPassword(password, storedHash);
@@ -638,7 +672,7 @@ Deno.serve(async (request) => {
       const state = await loadState();
       const employmentId = String(body.employmentId ?? '').trim().toLowerCase();
       const member = state.members.find((item) => item.employmentId.toLowerCase() === employmentId);
-      if (!member || (await getCredential(member))) {
+      if (!member || member.allowLegacyLogin === false || (await getCredential(member))) {
         return json({ error: 'Recovery wizard cannot be used with these details. Contact your manager for manual recovery.' }, 403);
       }
       return json({ ok: true });
@@ -649,7 +683,7 @@ Deno.serve(async (request) => {
       const employmentId = String(body.employmentId ?? '').trim().toLowerCase();
       const password = String(body.password ?? '');
       const member = state.members.find((item) => item.employmentId.toLowerCase() === employmentId);
-      if (!member || (await getCredential(member))) {
+      if (!member || member.allowLegacyLogin === false || (await getCredential(member))) {
         return json({ error: 'Recovery wizard cannot be used with these details. Contact your manager for manual recovery.' }, 403);
       }
       if (password.length < 10) return json({ error: 'Password must contain at least 10 characters.' }, 400);
