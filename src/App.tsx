@@ -661,6 +661,7 @@ export default function App() {
   const [view, setView] = useState<View>(() => window.location.hash.startsWith('#/hr') ? 'admin' : 'dashboard');
   const [profileTab, setProfileTab] = useState<ProfileTab>('profile');
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [adminFocusMode, setAdminFocusMode] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isEntraLoginPending, setIsEntraLoginPending] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -1138,7 +1139,7 @@ export default function App() {
   }
 
   return (
-    <main className="min-h-screen bg-mist pb-24 text-ink lg:pb-0">
+    <main className="min-h-screen overflow-x-hidden bg-mist pb-24 text-ink lg:pb-0">
       {loginIntroName && (
         <div className="login-intro fixed inset-0 z-[60] grid place-items-center bg-mist">
           <h1 className="px-6 text-center text-4xl font-semibold text-ink md:text-6xl">Welcome back, {loginIntroName}</h1>
@@ -1190,8 +1191,8 @@ export default function App() {
           )}
         </div>
       )}
-      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-4 lg:grid-cols-[250px_1fr] lg:px-6">
-        <aside className="workspace-sidebar hidden rounded-xl border border-line bg-paper p-4 shadow-soft lg:sticky lg:top-5 lg:block lg:h-[calc(100vh-2.5rem)]">
+      <div className={`workspace-shell mx-auto grid gap-6 transition-all duration-500 ${adminFocusMode ? 'max-w-none px-0 py-0 lg:grid-cols-[0_minmax(0,1fr)]' : 'max-w-7xl px-4 py-4 lg:grid-cols-[250px_minmax(0,1fr)] lg:px-6'}`}>
+        <aside className={`workspace-sidebar hidden rounded-xl border border-line bg-paper p-4 shadow-soft transition-all duration-500 lg:sticky lg:top-5 lg:block lg:h-[calc(100vh-2.5rem)] ${adminFocusMode ? 'pointer-events-none -translate-x-8 overflow-hidden opacity-0' : 'opacity-100'}`}>
           <div className="flex items-center gap-3 border-b border-line pb-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-ink text-white">
               <img className="h-6 w-6" src={BRAND_ICON} alt="" />
@@ -1243,7 +1244,7 @@ export default function App() {
           </button>
         </aside>
 
-        <div className="workspace-content grid gap-6">
+        <div className="workspace-content grid min-w-0 gap-6 transition-all duration-500">
           {view === 'dashboard' && currentMember.upworkRequired && !upworkSnapshot.connected ? (
             <UpworkRequiredGate member={currentMember} />
           ) : view === 'dashboard' && (
@@ -1293,6 +1294,7 @@ export default function App() {
               updateWorkspace={updateMembers}
               impersonateMember={impersonateMember}
               resetMemberPassword={resetMemberPassword}
+              onFocusModeChange={setAdminFocusMode}
             />
           )}
         </div>
@@ -1685,13 +1687,13 @@ function UpworkRequiredGate({ member }: { member: WorkspaceMember }) {
 
   return (
     <section className="mx-auto grid w-full max-w-2xl place-items-center rounded-xl border border-line bg-paper p-8 text-center shadow-soft sm:p-12">
-      <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-black text-xl font-bold text-white">up</span>
+      <span className="flex h-16 w-16 items-center justify-center rounded-xl bg-black p-3"><img className="w-full brightness-0 invert" src={publicAsset('resources/logos/upworklogo.webp')} alt="Upwork" /></span>
       <p className="mt-6 text-sm font-semibold uppercase tracking-[0.14em] text-forest">Partners™ onboarding</p>
       <h1 className="mt-3 text-3xl font-semibold">Connect Upwork to continue</h1>
       <p className="mt-3 max-w-lg text-zinc-600">Upwork connection is required for {displayName(member)} before the Workspace Dashboard can be opened.</p>
       {error && <p className="mt-4 text-sm font-semibold text-red-600">{error}</p>}
       <button className="mt-7 inline-flex h-12 items-center justify-center gap-3 rounded-lg bg-black px-6 font-semibold text-white disabled:opacity-60" disabled={isConnecting} onClick={() => void beginConnection()}>
-        <span className="text-lg font-bold">up</span>
+        <img className="h-5 w-auto brightness-0 invert" src={publicAsset('resources/logos/upworklogo.webp')} alt="" />
         {isConnecting ? 'Opening Upwork...' : 'Connect Upwork'}
       </button>
     </section>
@@ -1752,11 +1754,11 @@ function SkillsPanel({ member, editable = false, admin = false, updateMember }: 
     updateMember({ endorsedSkills: verified.has(skill) ? [...verified].filter((item) => item !== skill) : [...verified, skill] });
   }
   const groups = [
-    { title: 'Skills', items: skills, verified: true },
-    { title: 'Software', items: member.software.split(',').map((item) => item.trim()).filter(Boolean), verified: false },
-    { title: 'Languages', items: member.languages.split(',').map((item) => item.trim()).filter(Boolean), verified: false },
+    { title: 'Skills', items: skills },
+    { title: 'Software', items: member.software.split(',').map((item) => item.trim()).filter(Boolean) },
+    { title: 'Languages', items: member.languages.split(',').map((item) => item.trim()).filter(Boolean) },
   ];
-  return <section className="rounded-xl border border-line bg-paper p-5 shadow-soft sm:p-6"><div className="flex items-center gap-3"><Sparkles className="text-forest" size={20} /><h2 className="text-xl font-semibold">Skills</h2></div><div className="mt-5 grid gap-5">{groups.map((group) => <div key={group.title}><p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">{group.title}</p><div className="mt-3 flex flex-wrap gap-2">{group.items.map((item) => <button type="button" key={item} disabled={!admin || !group.verified} onClick={() => toggleVerified(item)} className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium ${group.verified && verified.has(item) ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-line bg-mist text-zinc-600'}`}>{group.verified && verified.has(item) && <BadgeCheck size={15} />}{item}</button>)}{!group.items.length && <span className="text-sm text-zinc-400">Nothing added yet</span>}</div></div>)}</div>{editable && updateMember && <div className="mt-5 flex gap-2 border-t border-line pt-5"><input className="h-11 min-w-0 flex-1 rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-forest" value={draft} placeholder="Add a skill" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSkill(); } }} /><button className="h-11 rounded-lg bg-ink px-4 text-sm font-semibold text-white" onClick={addSkill}>Add</button></div>}</section>;
+  return <section className="rounded-xl border border-line bg-paper p-5 shadow-soft sm:p-6"><div className="flex items-center gap-3"><Sparkles className="text-forest" size={20} /><h2 className="text-xl font-semibold">Skills</h2></div><div className="mt-5 grid gap-5">{groups.map((group) => <div key={group.title}><p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">{group.title}</p><div className="mt-3 flex flex-wrap gap-2">{group.items.map((item) => <button type="button" key={item} disabled={!admin} onClick={() => toggleVerified(item)} className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition ${verified.has(item) ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-line bg-mist text-zinc-600'} ${admin ? 'cursor-pointer hover:border-sky-300' : 'cursor-default'}`}>{verified.has(item) && <BadgeCheck size={15} />}{item}</button>)}{!group.items.length && <span className="text-sm text-zinc-400">Nothing added yet</span>}</div></div>)}</div>{editable && updateMember && <div className="mt-5 flex gap-2 border-t border-line pt-5"><input className="h-11 min-w-0 flex-1 rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-forest" value={draft} placeholder="Add a skill" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSkill(); } }} /><button className="h-11 rounded-lg bg-ink px-4 text-sm font-semibold text-white" onClick={addSkill}>Add</button></div>}</section>;
 }
 
 function ProjectCards({ member }: { member: WorkspaceMember }) {
@@ -1777,10 +1779,10 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
     <MemberHero member={member} avatarUrl={avatarUrl} />
     <nav className="profile-tabs flex gap-1 overflow-x-auto rounded-xl border border-line bg-paper p-2 shadow-soft">{tabs.map(([key, Icon, label]) => <button key={key} className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-lg px-4 text-sm font-semibold ${tab === key ? 'bg-mist text-forest' : 'text-zinc-600 hover:bg-mist'}`} onClick={() => setTab(key)}><Icon size={17} />{label}</button>)}</nav>
     {tab === 'profile' && <div className="grid gap-5"><div className={`grid gap-4 ${partner ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>{partner && <GaugeCard label="Partner Index" value={index} />}<GaugeCard label="Account Health" value={health * 33.33} displayValue={`${health}/3`} /><div className="kpi-card rounded-xl border border-line bg-paper p-5 shadow-soft"><Timer className="text-forest" size={24} /><p className="mt-8 text-4xl font-semibold">{formatPlannerTime(trackedHours)}</p><p className="mt-2 text-sm font-semibold text-zinc-600">Tracked Work Time</p></div></div><VerificationCard member={member} />{member.entraEmail && <div className="flex items-center gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sky-800"><img className="h-8 w-8" src={ENTRA_ICON} alt="" /><span className="font-semibold">Microsoft Entra ID is linked to this identity.</span></div>}<ProjectCards member={member} /><SkillsPanel member={member} /></div>}
-    {tab === 'contact' && <div className="grid gap-5"><section className="grid gap-4 rounded-xl border border-line bg-paper p-6 shadow-soft md:grid-cols-2"><Field label="Employment ID" value={member.employmentId} disabled onChange={() => undefined} /><Field label="Full Name" value={member.fullName} disabled onChange={() => undefined} /><Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateCurrentMember({ preferredName: value })} /><Field label="Entra ID Email" value={member.entraEmail} disabled onChange={() => undefined} /><Field label="Personal Email" value={member.personalEmail} disabled onChange={() => undefined} /><Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateCurrentMember({ phoneNumber: value })} /><Field label="Slack Tag" value={member.slackTag ?? ''} disabled onChange={() => undefined} /><Field label="Time Zone" value={member.timeZone} onChange={(value) => updateCurrentMember({ timeZone: value })} /><Field label="Portfolio" value={member.portfolio} onChange={(value) => updateCurrentMember({ portfolio: value })} /></section><a className="flex items-center justify-between rounded-xl border border-line bg-paper p-5 shadow-soft" href="https://join.slack.com/t/flatrealityeu/shared_invite/zt-3eeknccsz-MWbN2vlNbRNwu3blGs11kw" target="_blank" rel="noreferrer"><span><span className="block font-semibold">Update your Slack information</span><span className="mt-1 block text-sm text-zinc-500">Open Slack to manage your workspace identity.</span></span><span className="rounded-lg bg-[#4A154B] px-4 py-2 text-sm font-semibold text-white">Open Slack</span></a></div>}
+    {tab === 'contact' && <div className="grid gap-5"><section className="grid gap-4 rounded-xl border border-line bg-paper p-6 shadow-soft md:grid-cols-2"><Field label="Employment ID" value={member.employmentId} disabled onChange={() => undefined} /><Field label="Full Name" value={member.fullName} disabled onChange={() => undefined} /><Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateCurrentMember({ preferredName: value })} /><Field label="Entra ID Email" value={member.entraEmail} disabled onChange={() => undefined} /><Field label="Personal Email" value={member.personalEmail} disabled onChange={() => undefined} /><Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateCurrentMember({ phoneNumber: value })} /><Field label="Slack Tag" value={member.slackTag ?? ''} disabled onChange={() => undefined} /><Field label="Time Zone" value={member.timeZone} onChange={(value) => updateCurrentMember({ timeZone: value })} /><Field label="Portfolio" value={member.portfolio} onChange={(value) => updateCurrentMember({ portfolio: value })} /></section><a className="flex items-center justify-between rounded-xl border border-line bg-paper p-5 shadow-soft" href="https://join.slack.com/t/flatrealityeu/shared_invite/zt-3eeknccsz-MWbN2vlNbRNwu3blGs11kw" target="_blank" rel="noreferrer"><span><span className="block font-semibold">Need to change something else?</span><span className="mt-1 block text-sm text-zinc-500">Contact your manager via Slack.</span></span><span className="rounded-lg bg-[#4A154B] px-4 py-2 text-sm font-semibold text-white">Open Slack</span></a></div>}
     {tab === 'payments' && <div className="grid gap-5"><section className="flex items-center justify-between rounded-xl border border-line bg-paper p-6 shadow-soft"><div><p className="text-sm font-semibold text-zinc-500">Withheld Balance</p><p className="mt-2 text-sm text-zinc-500">Workspace reconciliation balance</p></div><strong className="text-4xl">{formatEuroAmount(member.withheldBalance)}</strong></section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">SupplierForm</h2><p className="mt-2 text-zinc-600">Update your payout and supplier information securely.</p><a className="mt-5 inline-flex h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white" href={isUpworkContract(member) ? 'https://www.upwork.com/nx/payments/disbursement-methods' : 'https://forms.office.com/r/maSdSX94Ui'} target="_blank" rel="noreferrer">{isUpworkContract(member) ? 'Open Upwork Payments' : 'Open Supplier Form'}</a></section></div>}
     {tab === 'skills' && <SkillsPanel member={member} editable updateMember={updateCurrentMember} />}
-    {tab === 'integrations' && <div className="grid gap-4"><section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><img className="h-11 w-11" src={ENTRA_ICON} alt="" /><div><h2 className="font-semibold">Microsoft Entra ID</h2><p className="mt-1 text-sm text-zinc-500">{member.entraEmail || 'Not connected'}</p></div></div>{member.entraEmail && <a className="rounded-lg bg-[#1686c8] px-4 py-2 text-sm font-semibold text-white" href="https://mysignins.microsoft.com/security-info" target="_blank" rel="noreferrer">SSO Settings</a>}</section>{(isIndependentPartner(member) || partner) && <section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div><h2 className="font-semibold">Upwork</h2><p className="mt-1 text-sm text-zinc-500">{upworkStatus || upwork.message || 'Synchronize partner contracts and payments.'}</p></div>{upwork.connected ? <div className="flex gap-2"><button className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" onClick={refreshUpwork}>Sync</button><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button></div> : <button className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" disabled={isUpworkBusy} onClick={() => void beginUpworkConnection()}>Connect Upwork</button>}</section>}<section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><Github size={38} /><div><h2 className="font-semibold">GitHub</h2><p className="mt-1 text-sm text-zinc-500">Connect your developer identity and project repositories.</p></div></div><button className="rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" onClick={() => window.alert('GitHub integration will be configured in the next step.')}>Connect GitHub</button></section></div>}
+    {tab === 'integrations' && <div className="grid gap-4"><section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><img className="h-11 w-11" src={ENTRA_ICON} alt="" /><div><h2 className="font-semibold">Microsoft Entra ID</h2><p className="mt-1 text-sm text-zinc-500">{member.entraEmail || 'Not connected'}</p></div></div>{member.entraEmail && <a className="rounded-lg bg-[#1686c8] px-4 py-2 text-sm font-semibold text-white" href="https://mysignins.microsoft.com/security-info" target="_blank" rel="noreferrer">SSO Settings</a>}</section>{(isIndependentPartner(member) || partner) && <section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div><h2 className="font-semibold">Upwork</h2><p className="mt-1 text-sm text-zinc-500">{upworkStatus || upwork.message || 'Synchronize partner contracts and payments.'}</p></div>{upwork.connected ? <div className="flex gap-2"><button className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" onClick={refreshUpwork}>Sync</button><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button></div> : <button className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" disabled={isUpworkBusy} onClick={() => void beginUpworkConnection()}><img className="h-5 w-auto brightness-0 invert" src={publicAsset('resources/logos/upworklogo.webp')} alt="" />Connect Upwork</button>}</section>}<section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><Github size={38} /><div><h2 className="font-semibold">GitHub</h2><p className="mt-1 text-sm text-zinc-500">Connect your developer identity and project repositories.</p></div></div><button className="rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" onClick={() => window.alert('GitHub integration will be configured in the next step.')}>Connect GitHub</button></section></div>}
     <div className="flex flex-wrap gap-3 lg:hidden"><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" onClick={() => setView('dashboard')}>Home</button><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" onClick={onLogout}>Log Out</button></div>
   </div>;
 }
@@ -2970,6 +2972,7 @@ function Admin({
   updateWorkspace,
   impersonateMember,
   resetMemberPassword,
+  onFocusModeChange,
 }: {
   members: WorkspaceMember[];
   levels: Level[];
@@ -2984,10 +2987,11 @@ function Admin({
   updateWorkspace: WorkspaceUpdate;
   impersonateMember: (memberId: string) => void | Promise<void>;
   resetMemberPassword: (memberId: string) => void | Promise<void>;
+  onFocusModeChange: (focused: boolean) => void;
 }) {
   const [module, setModule] = useState<AdminModule>(() => window.location.hash.startsWith('#/hr') ? 'hr' : 'home');
 
-  if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} impersonateMember={impersonateMember} resetMemberPassword={resetMemberPassword} onBack={() => { window.location.hash = ''; setModule('home'); }} />;
+  if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} impersonateMember={impersonateMember} resetMemberPassword={resetMemberPassword} onFocusModeChange={onFocusModeChange} onBack={() => { window.location.hash = ''; setModule('home'); }} />;
   if (module === 'partners') return <AdminPartners members={members} setMembers={setMembers} onBack={() => setModule('home')} />;
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
@@ -3054,6 +3058,7 @@ function HrAdmin({
   updateWorkspace,
   impersonateMember,
   resetMemberPassword,
+  onFocusModeChange,
   onBack,
 }: {
   members: WorkspaceMember[];
@@ -3065,6 +3070,7 @@ function HrAdmin({
   updateWorkspace: WorkspaceUpdate;
   impersonateMember: (memberId: string) => void | Promise<void>;
   resetMemberPassword: (memberId: string) => void | Promise<void>;
+  onFocusModeChange: (focused: boolean) => void;
   onBack: () => void;
 }) {
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
@@ -3076,6 +3082,12 @@ function HrAdmin({
   const filteredMembers = members.filter((member) => [member.fullName, member.preferredName, member.employmentId, member.jobRole].join(' ').toLowerCase().includes(search.toLowerCase()));
   const visibleMembers = filteredMembers.filter((member) => member.status !== 'suspended');
   const suspendedMembers = filteredMembers.filter((member) => member.status === 'suspended');
+
+  useEffect(() => {
+    onFocusModeChange(Boolean(selectedMemberId) || isOnboarding);
+  }, [selectedMemberId, isOnboarding, onFocusModeChange]);
+
+  useEffect(() => () => onFocusModeChange(false), [onFocusModeChange]);
 
   function completeOnboarding(member: WorkspaceMember) {
     updateWorkspace([...members, member], [...workRecords, registrationRecord(member)]);
@@ -3091,7 +3103,7 @@ function HrAdmin({
   }
 
   return (
-    <div className="grid gap-6">
+    <div className={`grid gap-6 ${isOnboarding ? 'min-h-screen' : selectedMember ? 'p-4 lg:p-6' : ''}`}>
       {isOnboarding ? (
         <HrOnboardingWizard
           members={members}
@@ -3100,7 +3112,7 @@ function HrAdmin({
         />
       ) : (
       <>
-      <BackButton onBack={onBack} />
+      {!selectedMember && <BackButton onBack={onBack} />}
       {!selectedMember ? (
         <>
           <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
