@@ -68,7 +68,7 @@ import {
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin, syncEntraProfile, syncGitHubAccess } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin, syncEntraProfile, syncGitHubAccess } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -89,6 +89,7 @@ import type {
   ScheduleDayCompletion,
   ScheduleDayStatus,
   ScheduleShift,
+  SteamSnapshot,
   UpworkContractDraft,
   UpworkSnapshot,
   WorkRecord,
@@ -133,6 +134,13 @@ const EMPTY_GITHUB_SNAPSHOT: GitHubSnapshot = {
   teamSlugs: [],
   syncError: '',
   lastSyncedAt: '',
+};
+const EMPTY_STEAM_SNAPSHOT: SteamSnapshot = {
+  connected: false,
+  steamId: '',
+  profileUrl: '',
+  packageStatus: 'not_connected',
+  connectedAt: '',
 };
 
 function isAllowedEntraEmail(value: string) {
@@ -1816,7 +1824,6 @@ function MemberHero({ member, avatarUrl, compact = false }: { member: WorkspaceM
           <h1 className="flex min-w-0 items-center gap-2 text-3xl font-semibold sm:text-4xl"><span className="min-w-0 break-words">{displayName(member)}</span><VerifiedMark member={member} /></h1>
           <p className="mt-2 break-words text-sm text-zinc-600 sm:text-base">{[member.seniority, member.jobRole].filter(Boolean).join(' · ') || 'Role not assigned'} <span className="mx-2 text-zinc-300">•</span> {isCoreTeam(member) ? 'Core Team' : 'Independent Partner'}</p>
           <div className="mt-4 flex flex-wrap gap-2">
-            {member.entraEmail && <span className="inline-flex h-9 items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 text-sm font-semibold text-sky-700"><img className="h-5 w-5" src={ENTRA_ICON} alt="" />Entra ID</span>}
             {member.benefitPrograms.map((project) => <span key={project} className="inline-flex h-9 items-center rounded-full border border-line bg-mist px-3 text-sm font-semibold">{projectLabel(project)}</span>)}
           </div>
         </div>
@@ -1896,6 +1903,9 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
   const [github, setGitHub] = useState<GitHubSnapshot>(EMPTY_GITHUB_SNAPSHOT);
   const [githubMessage, setGitHubMessage] = useState('');
   const [isGitHubBusy, setIsGitHubBusy] = useState(false);
+  const [steam, setSteam] = useState<SteamSnapshot>(EMPTY_STEAM_SNAPSHOT);
+  const [steamMessage, setSteamMessage] = useState('');
+  const [isSteamBusy, setIsSteamBusy] = useState(false);
   const partner = isFrPartnersConnected(member);
   const index = calculatePartnerQualityIndex(member, upwork, openExplanationRequestCount(records, member.id));
   const health = Math.max(0, 3 - member.strikeSystem);
@@ -1914,6 +1924,18 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
     }
   }
   useEffect(() => { void refreshGitHub(); }, [member.id]);
+  async function refreshSteam() {
+    const token = getStoredSession()?.token;
+    if (!token || !isSupabaseConfigured) return;
+    try {
+      setSteam(await getSteamSnapshot(token));
+      const url = new URL(window.location.href);
+      setSteamMessage(url.searchParams.get('steam_error') || (url.searchParams.get('steam') === 'connected' ? 'Steam identity connected.' : ''));
+    } catch (error) {
+      setSteamMessage(error instanceof Error ? error.message : 'Steam connection could not be loaded.');
+    }
+  }
+  useEffect(() => { void refreshSteam(); }, [member.id]);
   async function beginGitHubConnection() {
     const token = getStoredSession()?.token;
     if (!token) return;
@@ -1932,6 +1954,19 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
     setIsGitHubBusy(true);
     try { await disconnectGitHub(token); setGitHub(EMPTY_GITHUB_SNAPSHOT); setGitHubMessage('GitHub disconnected.'); } catch (error) { setGitHubMessage(error instanceof Error ? error.message : 'GitHub could not be disconnected.'); } finally { setIsGitHubBusy(false); }
   }
+  async function beginSteamConnection() {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    setIsSteamBusy(true);
+    setSteamMessage('');
+    try { await connectSteam(token); } catch (error) { setSteamMessage(error instanceof Error ? error.message : 'Steam connection could not be started.'); setIsSteamBusy(false); }
+  }
+  async function removeSteamConnection() {
+    const token = getStoredSession()?.token;
+    if (!token || !window.confirm('Disconnect Steam from this Workspace profile?')) return;
+    setIsSteamBusy(true);
+    try { await disconnectSteam(token); setSteam(EMPTY_STEAM_SNAPSHOT); setSteamMessage('Steam disconnected.'); } catch (error) { setSteamMessage(error instanceof Error ? error.message : 'Steam could not be disconnected.'); } finally { setIsSteamBusy(false); }
+  }
   const tabs: Array<[ProfileTab, LucideIcon, string]> = [['profile', UserRound, 'Profile'], ['contact', Contact, 'Contact'], ['payments', WalletCards, 'Payments'], ['skills', Sparkles, 'Skills'], ['integrations', Link2, 'Integrations']];
   return <div className="profile-viva grid gap-5 pb-8">
     <MemberHero member={member} avatarUrl={avatarUrl} />
@@ -1941,6 +1976,7 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
     {tab === 'payments' && <div className="grid gap-5"><section className="flex items-center justify-between rounded-xl border border-line bg-paper p-6 shadow-soft"><div><p className="text-sm font-semibold text-zinc-500">Withheld Balance</p><p className="mt-2 text-sm text-zinc-500">Workspace reconciliation balance</p></div><strong className="text-4xl">{formatEuroAmount(member.withheldBalance)}</strong></section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">SupplierForm</h2><p className="mt-2 text-zinc-600">Update your payout and supplier information securely.</p><a className="mt-5 inline-flex h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white" href={isUpworkContract(member) ? 'https://www.upwork.com/nx/payments/disbursement-methods' : 'https://forms.office.com/r/maSdSX94Ui'} target="_blank" rel="noreferrer">{isUpworkContract(member) ? 'Open Upwork Payments' : 'Open Supplier Form'}</a></section></div>}
     {tab === 'skills' && <SkillsPanel member={member} editable updateMember={updateCurrentMember} />}
     {tab === 'integrations' && <div className="grid gap-4"><section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><img className="h-11 w-11" src={ENTRA_ICON} alt="" /><div><h2 className="font-semibold">Microsoft Entra ID</h2><p className="mt-1 text-sm text-zinc-500">{member.entraEmail || 'Not connected'}</p></div></div>{member.entraEmail && <a className="rounded-lg bg-[#1686c8] px-4 py-2 text-sm font-semibold text-white" href="https://mysignins.microsoft.com/security-info" target="_blank" rel="noreferrer">SSO Settings</a>}</section>{(isIndependentPartner(member) || partner) && <section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div><h2 className="font-semibold">Upwork</h2><p className="mt-1 text-sm text-zinc-500">{upworkStatus || upwork.message || 'Synchronize partner contracts and payments.'}</p></div>{upwork.connected ? <div className="flex gap-2"><button className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" onClick={refreshUpwork}>Sync</button><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button></div> : <button className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" disabled={isUpworkBusy} onClick={() => void beginUpworkConnection()}><img className="h-5 w-auto brightness-0 invert" src={publicAsset('resources/logos/upworklogo.webp')} alt="" />Connect Upwork</button>}</section>}<section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex min-w-0 items-center gap-4">{github.avatarUrl ? <img className="h-11 w-11 rounded-full object-cover" src={github.avatarUrl} alt="" /> : <Github size={38} />}<div className="min-w-0"><h2 className="font-semibold">GitHub</h2><p className="mt-1 truncate text-sm text-zinc-500">{github.connected ? `@${github.username} · ${github.membershipState === 'active' ? 'Organization access active' : github.membershipState === 'pending' ? 'Organization invitation pending' : 'Access needs attention'}` : 'Connect your developer identity and project repositories.'}</p>{(githubMessage || github.syncError) && <p className="mt-1 text-sm text-amber-700">{githubMessage || github.syncError}</p>}</div></div>{github.connected ? <div className="flex shrink-0 flex-wrap gap-2"><a className="rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" href={github.profileUrl} target="_blank" rel="noreferrer">Open GitHub</a><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isGitHubBusy} onClick={() => void synchronizeGitHub()}>Sync Access</button><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" disabled={isGitHubBusy} onClick={() => void removeGitHubConnection()}>Disconnect</button></div> : <button className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" disabled={isGitHubBusy} onClick={() => void beginGitHubConnection()}><Github size={18} />Connect GitHub</button>}</section></div>}
+    {tab === 'integrations' && <div className="grid gap-4"><div className="flex items-center gap-3 pt-2"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest/10 text-forest"><Gift size={21} /></span><div><h2 className="text-xl font-semibold">Autogrant Packages</h2><p className="text-sm text-zinc-500">Link your Steam identity for project packages and developer access.</p></div></div><section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex min-w-0 items-center gap-4"><span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-black"><img className="h-full w-full object-contain" src={publicAsset('resources/logos/steamworks.png')} alt="" /></span><div className="min-w-0"><h3 className="font-semibold">Steamworks</h3><p className="mt-1 text-sm text-zinc-500">{steam.connected ? (steam.packageStatus === 'ready' ? 'Autogrant packages ready.' : 'Connected · Ready for Steamworks group assignment.') : 'Connect Steam to prepare automatic project package access.'}</p>{steamMessage && <p className={`mt-1 text-sm ${steamMessage.includes('connected') ? 'text-emerald-700' : 'text-amber-700'}`}>{steamMessage}</p>}</div></div>{steam.connected ? <div className="flex shrink-0 flex-wrap gap-2"><a className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" href={steam.profileUrl} target="_blank" rel="noreferrer">Open Steam</a><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" disabled={isSteamBusy} onClick={() => void removeSteamConnection()}>Disconnect</button></div> : <button className="inline-flex h-11 shrink-0 items-center justify-center gap-3 rounded-lg bg-black px-5 text-sm font-semibold text-white disabled:opacity-60" disabled={isSteamBusy} onClick={() => void beginSteamConnection()}><img className="h-6 w-6 object-contain" src={publicAsset('resources/logos/steamworks.png')} alt="" />{isSteamBusy ? 'Connecting...' : 'Connect Steamworks'}</button>}</section></div>}
     <div className="flex flex-wrap gap-3 lg:hidden"><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" onClick={() => setView('dashboard')}>Home</button><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" onClick={onLogout}>Log Out</button></div>
   </div>;
 }
@@ -3456,6 +3492,10 @@ function OnboardingProgressCard({ member, updateMember }: { member: WorkspaceMem
   return <section className="onboarding-progress overflow-hidden rounded-xl border border-forest/20 p-6 shadow-soft"><div className="flex flex-col justify-between gap-5 md:flex-row md:items-center"><div><p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Onboarding Journey</p><h2 className="mt-2 text-2xl font-semibold">Complete employee onboarding</h2><div className="mt-5 grid gap-3">{steps.map((step) => <div key={step.label} className="flex items-center gap-3"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${step.done ? 'bg-emerald-500 text-white' : 'border border-line bg-paper text-zinc-400'}`}>{step.done ? <Check size={15} /> : <span className="h-2 w-2 rounded-full bg-current" />}</span><span className={step.done ? 'font-medium' : 'text-zinc-500'}>{step.label}</span></div>)}</div></div><button disabled={!ready} className="h-11 rounded-lg bg-forest px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40" onClick={confirm}>Confirm completion · +100 XP</button></div></section>;
 }
 
+function IntegrationBadge({ label, connected, icon }: { label: string; connected: boolean; icon: ReactNode }) {
+  return <span className={`inline-flex h-10 items-center gap-2 rounded-full border px-3 text-sm font-semibold ${connected ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-line bg-mist text-zinc-500'}`}>{icon}<span>{label}</span><span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-zinc-300'}`} /></span>;
+}
+
 function AdminOverviewTab({ member, records, avatarUrl, upwork, updateMember }: { member: WorkspaceMember; records: WorkRecord[]; avatarUrl: string; upwork: UpworkSnapshot; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
   const partner = isFrPartnersConnected(member);
   const index = calculatePartnerQualityIndex(member, upwork, openExplanationRequestCount(records, member.id));
@@ -3465,6 +3505,7 @@ function AdminOverviewTab({ member, records, avatarUrl, upwork, updateMember }: 
   return <div className="grid gap-5">
     <OnboardingProgressCard member={member} updateMember={updateMember} />
     <section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Contact Information</h2><div className="mt-5 grid gap-x-8 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">{[[Mail, 'Personal Email', member.personalEmail], [ShieldCheck, 'Entra ID', member.entraEmail], [Phone, 'Phone', member.phoneNumber], [MessageCircle, 'Slack', member.slackTag ?? ''], [MapPin, 'Time Zone', member.timeZone]].map(([Icon, label, value]) => { const ContactIcon = Icon as LucideIcon; return <div key={String(label)} className="flex gap-3"><ContactIcon className="mt-0.5 text-zinc-400" size={18} /><div><p className="text-xs font-medium text-zinc-500">{String(label)}</p><p className="mt-1 text-sm font-semibold">{String(value || 'Not provided')}</p></div></div>; })}</div></section>
+    <section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Integrations</h2><div className="mt-4 flex flex-wrap gap-3"><IntegrationBadge label="Microsoft Entra ID" connected={Boolean(member.entraSetupCompleted)} icon={<img className="h-5 w-5" src={ENTRA_ICON} alt="" />} /><IntegrationBadge label="Upwork" connected={upwork.connected} icon={<span className="text-xs font-black">up</span>} /><IntegrationBadge label="GitHub" connected={Boolean(member.githubConnected)} icon={<Github size={18} />} /><IntegrationBadge label="Steamworks" connected={Boolean(member.steamConnected)} icon={<img className="h-5 w-5 rounded bg-black object-contain" src={publicAsset('resources/logos/steamworks.png')} alt="" />} /></div></section>
     <div className={`grid gap-4 ${partner ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>{partner && <GaugeCard label="Partner Index" value={index} />}<GaugeCard label="Account Health" value={health * 33.33} displayValue={`${health}/3`} /><div className="kpi-card rounded-xl border border-line bg-paper p-5 shadow-soft"><Timer className="text-forest" size={25} /><p className="mt-8 text-4xl font-semibold">{formatPlannerTime(trackedHours)}</p><p className="mt-2 text-sm font-semibold text-zinc-600">Tracked Work Time</p></div><div className="kpi-card rounded-xl border border-line bg-paper p-5 shadow-soft md:col-span-1"><BriefcaseBusiness className="text-forest" size={25} /><p className="mt-8 text-xl font-semibold">{activeContract?.title || member.onboarding.contractType}</p><p className="mt-2 text-sm font-semibold text-zinc-600">Current Contract</p></div></div>
     <SkillsPanel member={member} editable admin updateMember={updateMember} />
   </div>;

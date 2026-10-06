@@ -55,6 +55,9 @@ function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
     githubUserId: member.githubUserId ?? '',
     githubAvatarUrl: member.githubAvatarUrl ?? '',
     githubProfileUrl: member.githubProfileUrl ?? '',
+    steamConnected: Boolean(member.steamConnected),
+    steamId: member.steamId ?? '',
+    steamProfileUrl: member.steamProfileUrl ?? '',
   };
 }
 
@@ -172,6 +175,26 @@ async function callGitHubApi<T>(payload: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
+async function callSteamApi<T>(payload: Record<string, unknown>): Promise<T> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase.functions.invoke('steam-integration', { body: payload });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const responseBody = await context.json() as { error?: unknown };
+        if (typeof responseBody.error === 'string' && responseBody.error.trim()) message = responseBody.error;
+      } catch {
+        // Keep the transport error when the function did not return JSON.
+      }
+    }
+    throw new Error(message);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data as T;
+}
+
 export async function getGitHubSnapshot(sessionToken: string, memberId?: string): Promise<GitHubSnapshot> {
   const response = await callGitHubApi<{ snapshot: GitHubSnapshot }>({ action: 'snapshot', sessionToken, memberId });
   return response.snapshot;
@@ -192,6 +215,23 @@ export async function syncGitHubAccess(sessionToken: string, memberId?: string):
 
 export async function disconnectGitHub(sessionToken: string, memberId?: string): Promise<void> {
   await callGitHubApi({ action: 'disconnect', sessionToken, memberId });
+}
+
+export async function getSteamSnapshot(sessionToken: string, memberId?: string): Promise<import('./types').SteamSnapshot> {
+  const response = await callSteamApi<{ snapshot: import('./types').SteamSnapshot }>({ action: 'snapshot', sessionToken, memberId });
+  return response.snapshot;
+}
+
+export async function connectSteam(sessionToken: string): Promise<void> {
+  const returnUrl = new URL(window.location.href);
+  returnUrl.search = '';
+  returnUrl.hash = '#/profile';
+  const response = await callSteamApi<{ authorizationUrl: string }>({ action: 'connect', sessionToken, returnUrl: returnUrl.toString() });
+  window.location.assign(response.authorizationUrl);
+}
+
+export async function disconnectSteam(sessionToken: string, memberId?: string): Promise<void> {
+  await callSteamApi({ action: 'disconnect', sessionToken, memberId });
 }
 
 export async function getUpworkSnapshot(sessionToken: string, memberId?: string, force = false): Promise<UpworkSnapshot> {

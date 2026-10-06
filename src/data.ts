@@ -50,6 +50,9 @@ export const emptyMember: WorkspaceMember = {
   githubUserId: '',
   githubAvatarUrl: '',
   githubProfileUrl: '',
+  steamConnected: false,
+  steamId: '',
+  steamProfileUrl: '',
   onboarding: {
     gdprSigned: false,
     gdprUrl: '',

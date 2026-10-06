@@ -64,6 +64,9 @@ type WorkspaceMember = {
   githubUserId?: string;
   githubAvatarUrl?: string;
   githubProfileUrl?: string;
+  steamConnected?: boolean;
+  steamId?: string;
+  steamProfileUrl?: string;
 };
 
 type WorkspaceState = {
@@ -259,6 +262,9 @@ function entraComparable(member: WorkspaceMember) {
       githubUserId: member.githubUserId || '',
       githubAvatarUrl: member.githubAvatarUrl || '',
       githubProfileUrl: member.githubProfileUrl || '',
+      steamConnected: Boolean(member.steamConnected),
+      steamId: member.steamId || '',
+      steamProfileUrl: member.steamProfileUrl || '',
     },
   };
 }

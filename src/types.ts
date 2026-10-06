@@ -85,6 +85,14 @@ export type GitHubSnapshot = {
   lastSyncedAt: string;
 };
 
+export type SteamSnapshot = {
+  connected: boolean;
+  steamId: string;
+  profileUrl: string;
+  packageStatus: 'not_connected' | 'pending_admin' | 'ready';
+  connectedAt: string;
+};
+
 export type EntraDevice = {
   id: string;
   deviceId: string;
@@ -180,6 +188,9 @@ export type WorkspaceMember = {
   githubUserId?: string;
   githubAvatarUrl?: string;
   githubProfileUrl?: string;
+  steamConnected?: boolean;
+  steamId?: string;
+  steamProfileUrl?: string;
   pendingUpworkContract?: Omit<UpworkContractDraft, 'memberId'>;
   onboarding: {
     gdprSigned: boolean;
