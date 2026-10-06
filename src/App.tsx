@@ -68,7 +68,7 @@ import {
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin, syncEntraProfile, syncGitHubAccess } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, reconcileAccessFromEntra, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin, syncEntraProfile, syncGitHubAccess } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -3271,6 +3271,7 @@ function HrAdmin({
   const [tab, setTab] = useState<HrTab>('overview');
   const [search, setSearch] = useState('');
   const [showSuspendedUsers, setShowSuspendedUsers] = useState(false);
+  const [accessSyncStatus, setAccessSyncStatus] = useState('');
   const [isOnboarding, setIsOnboarding] = useState(() => window.location.hash === '#/hr/onboarding');
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? null;
   const filteredMembers = members.filter((member) => [member.fullName, member.preferredName, member.employmentId, member.jobRole].join(' ').toLowerCase().includes(search.toLowerCase()));
@@ -3296,6 +3297,19 @@ function HrAdmin({
     setMembers((items) => items.map((member) => (member.id === selectedMember.id ? { ...member, ...changes } : member)));
   }
 
+  async function reconcileAccess() {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    setAccessSyncStatus('Reading the canonical Entra group matrix...');
+    try {
+      const result = await reconcileAccessFromEntra(token);
+      setMembers(result.state.members);
+      setAccessSyncStatus(result.warnings.length ? `Access synchronized with ${result.warnings.length} warning(s).` : 'Entra Groups, Workspace and GitHub Teams are synchronized.');
+    } catch (error) {
+      setAccessSyncStatus(error instanceof Error ? error.message : 'Access synchronization failed.');
+    }
+  }
+
   return (
     <div className={`hr-admin-page grid gap-4 sm:gap-6 ${isOnboarding ? 'min-h-screen' : selectedMember ? 'p-3 sm:p-4 lg:p-6' : ''}`}>
       {isOnboarding ? (
@@ -3315,11 +3329,9 @@ function HrAdmin({
                 <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">HR</p>
                 <h1 className="mt-3 text-3xl font-semibold">People</h1>
               </div>
-              <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-medium text-white" onClick={() => { window.location.hash = '/hr/onboarding'; setIsOnboarding(true); }}>
-                <Plus size={17} />
-                Add User
-              </button>
+              <div className="flex flex-wrap gap-2"><button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 text-sm font-medium" onClick={() => void reconcileAccess()}><RefreshCw size={17} />Sync Access</button><button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-medium text-white" onClick={() => { window.location.hash = '/hr/onboarding'; setIsOnboarding(true); }}><Plus size={17} />Add User</button></div>
             </div>
+            {accessSyncStatus && <p className="mt-4 rounded-lg border border-line bg-mist px-3 py-2 text-sm text-zinc-600">{accessSyncStatus}</p>}
             <label className="mt-5 flex h-11 items-center gap-3 rounded-lg border border-line px-3">
               <Search size={18} className="text-zinc-400" />
               <input className="w-full outline-none" placeholder="Search users" value={search} onChange={(event) => setSearch(event.target.value)} />

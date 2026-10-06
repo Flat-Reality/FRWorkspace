@@ -321,6 +321,11 @@ export async function syncEntraProfile(sessionToken: string, memberId: string): 
   return response.warnings ?? [];
 }
 
+export async function reconcileAccessFromEntra(sessionToken: string): Promise<{ state: WorkspaceState; warnings: string[] }> {
+  const response = await callWorkspaceApi<{ state: Partial<WorkspaceState>; warnings?: string[] }>({ action: 'reconcile_access_from_entra', sessionToken });
+  return { state: normalizeWorkspaceState(response.state), warnings: response.warnings ?? [] };
+}
+
 export async function signOutEntra(): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.auth.signOut();

@@ -19,6 +19,9 @@ type WorkspaceMember = {
   preferredName?: string;
   fullName?: string;
   benefitPrograms?: string[];
+  contractType?: string;
+  permissions?: string[];
+  permissionDetails?: string[];
   githubConnected?: boolean;
   githubUsername?: string;
   githubUserId?: string;
@@ -35,6 +38,12 @@ type GitHubSecrets = {
   github_client_secret?: string;
   github_private_key?: string;
   github_organization?: string;
+};
+
+type AccessGroup = {
+  group_key: string;
+  display_name: string;
+  github_team_slug: string;
 };
 
 function json(body: unknown, status = 200) {
@@ -179,12 +188,58 @@ async function installationToken() {
   return payload.token;
 }
 
-async function projectTeamSlugs(member: WorkspaceMember) {
-  const projects = member.benefitPrograms ?? [];
-  if (!projects.length) return [];
-  const { data, error } = await supabase.from('workspace_github_project_teams').select('project_key, team_slug').in('project_key', projects);
+async function loadAccessGroups(): Promise<AccessGroup[]> {
+  const { data, error } = await supabase.from('workspace_access_groups').select('group_key, display_name, github_team_slug').order('display_name');
   if (error) throw error;
-  return (data ?? []).map((item) => String(item.team_slug));
+  return (data ?? []) as AccessGroup[];
+}
+
+function desiredAccessGroupKeys(member: WorkspaceMember) {
+  const keys = new Set<string>();
+  if (member.contractType === 'CORE TEAM') keys.add('core_team');
+  if (member.contractType === 'INDEPENDENT PARTNER') keys.add('independent_partner');
+  const permissions = new Set(member.permissions ?? []);
+  if (member.isAdmin || permissions.has('Admin')) keys.add('administration');
+  if (permissions.has('Community')) keys.add('community');
+  if (permissions.has('Developer')) keys.add('developers');
+  if (permissions.has('HR')) keys.add('hr');
+  if (permissions.has('Operations')) keys.add('operations');
+  const details = new Set(member.permissionDetails ?? []);
+  if (details.has('Art')) keys.add('creative_artists');
+  if (details.has('Music') || details.has('Sound Design')) keys.add('creative_audio');
+  if (details.has('Game & Level Design')) keys.add('creative_game_designers');
+  const projects = new Set(member.benefitPrograms ?? []);
+  if (projects.has('FR Partners')) keys.add('project_partners');
+  if (projects.has('RAIN HEART')) keys.add('project_rain_heart');
+  if (projects.has('The Nick')) keys.add('project_the_nick');
+  return keys;
+}
+
+async function ensureAccessTeams(token: string, organization: string) {
+  const groups = await loadAccessGroups();
+  const teams = await githubRequest<Array<{ name: string; slug: string }>>(`/orgs/${encodeURIComponent(organization)}/teams?per_page=100`, token);
+  const resolved: AccessGroup[] = [];
+  for (const group of groups) {
+    let team = teams.find((item) => item.slug === group.github_team_slug)
+      ?? teams.find((item) => item.name.toLocaleLowerCase() === group.display_name.toLocaleLowerCase());
+    if (!team) {
+      team = await githubRequest<{ name: string; slug: string }>(`/orgs/${encodeURIComponent(organization)}/teams`, token, {
+        method: 'POST',
+        body: JSON.stringify({ name: group.display_name, privacy: 'closed' }),
+      });
+      teams.push(team);
+    } else if (team.name !== group.display_name) {
+      team = await githubRequest<{ name: string; slug: string }>(`/orgs/${encodeURIComponent(organization)}/teams/${encodeURIComponent(team.slug)}`, token, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: group.display_name, privacy: 'closed' }),
+      });
+    }
+    if (team.slug !== group.github_team_slug) {
+      await supabase.from('workspace_access_groups').update({ github_team_slug: team.slug, updated_at: new Date().toISOString() }).eq('group_key', group.group_key);
+    }
+    resolved.push({ ...group, github_team_slug: team.slug });
+  }
+  return resolved;
 }
 
 async function synchronizeAccess(member: WorkspaceMember, profile: { id: number; login: string; html_url?: string; avatar_url?: string; email?: string }) {
@@ -201,18 +256,28 @@ async function synchronizeAccess(member: WorkspaceMember, profile: { id: number;
     });
   }
   const membershipState = membership.state === 'active' ? 'active' : 'pending';
-  const teamSlugs = await projectTeamSlugs(member);
+  const groups = await ensureAccessTeams(token, organization);
+  const desiredKeys = desiredAccessGroupKeys(member);
+  const teamSlugs = groups.filter((group) => desiredKeys.has(group.group_key)).map((group) => group.github_team_slug);
   const warnings: string[] = [];
 
   if (membershipState === 'active') {
-    for (const teamSlug of teamSlugs) {
+    for (const group of groups) {
+      const shouldBeMember = desiredKeys.has(group.group_key);
       try {
-        await githubRequest(`/orgs/${encodeURIComponent(organization)}/teams/${encodeURIComponent(teamSlug)}/memberships/${encodeURIComponent(profile.login)}`, token, {
-          method: 'PUT',
-          body: JSON.stringify({ role: 'member' }),
-        });
+        if (shouldBeMember) {
+          await githubRequest(`/orgs/${encodeURIComponent(organization)}/teams/${encodeURIComponent(group.github_team_slug)}/memberships/${encodeURIComponent(profile.login)}`, token, {
+            method: 'PUT',
+            body: JSON.stringify({ role: 'member' }),
+          });
+        } else {
+          await githubRequest(`/orgs/${encodeURIComponent(organization)}/teams/${encodeURIComponent(group.github_team_slug)}/memberships/${encodeURIComponent(profile.login)}`, token, { method: 'DELETE' }).catch((error) => {
+            if (error instanceof Error && /not found/i.test(error.message)) return null;
+            throw error;
+          });
+        }
       } catch (error) {
-        warnings.push(`${teamSlug}: ${error instanceof Error ? error.message : 'Team access could not be assigned.'}`);
+        warnings.push(`${group.display_name}: ${error instanceof Error ? error.message : 'Team access could not be synchronized.'}`);
       }
     }
   }
@@ -249,6 +314,58 @@ async function connectionSnapshot(memberId: string) {
     syncError: data.sync_error,
     lastSyncedAt: data.last_synced_at ?? '',
   };
+}
+
+async function removeManagedTeamAccess(memberId: string) {
+  const { data, error } = await supabase.from('workspace_github_connections').select('*').eq('member_id', memberId).maybeSingle();
+  if (error) throw error;
+  if (!data) return [] as string[];
+  const secrets = await getSecrets();
+  const organization = secrets.github_organization || 'Flat-Reality';
+  const token = await installationToken();
+  const groups = await ensureAccessTeams(token, organization);
+  const warnings: string[] = [];
+  for (const group of groups) {
+    try {
+      await githubRequest(`/orgs/${encodeURIComponent(organization)}/teams/${encodeURIComponent(group.github_team_slug)}/memberships/${encodeURIComponent(data.github_username)}`, token, { method: 'DELETE' });
+    } catch (error) {
+      if (!(error instanceof Error && /not found/i.test(error.message))) warnings.push(`${group.display_name}: ${error instanceof Error ? error.message : 'Team access could not be removed.'}`);
+    }
+  }
+  await supabase.from('workspace_github_connections').update({ team_slugs: [], sync_error: warnings.join(' | '), last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('member_id', memberId);
+  return warnings;
+}
+
+async function synchronizeConnectedMembers(memberIds: string[], removedMemberIds: string[] = []) {
+  const state = await loadState();
+  const selected = new Set(memberIds);
+  const members = selected.size ? state.members.filter((member) => selected.has(member.id)) : removedMemberIds.length ? [] : state.members;
+  const secrets = await getSecrets();
+  const organization = secrets.github_organization || 'Flat-Reality';
+  await ensureAccessTeams(await installationToken(), organization);
+  const warnings: string[] = [];
+  for (const member of members) {
+    const { data, error } = await supabase.from('workspace_github_connections').select('*').eq('member_id', member.id).maybeSingle();
+    if (error) {
+      warnings.push(`${displayName(member)}: ${error.message}`);
+      continue;
+    }
+    if (!data) continue;
+    try {
+      const access = await synchronizeAccess(member, { id: Number(data.github_user_id), login: data.github_username, html_url: data.profile_url, avatar_url: data.avatar_url, email: data.email });
+      warnings.push(...access.warnings.map((warning) => `${displayName(member)}: ${warning}`));
+    } catch (error) {
+      warnings.push(`${displayName(member)}: ${error instanceof Error ? error.message : 'GitHub access could not be synchronized.'}`);
+    }
+  }
+  for (const memberId of removedMemberIds) {
+    try {
+      warnings.push(...(await removeManagedTeamAccess(memberId)).map((warning) => `${memberId}: ${warning}`));
+    } catch (error) {
+      warnings.push(`${memberId}: ${error instanceof Error ? error.message : 'GitHub team access could not be removed.'}`);
+    }
+  }
+  return warnings;
 }
 
 async function callback(url: URL) {
@@ -319,9 +436,15 @@ Deno.serve(async (request) => {
 
   try {
     const body = await request.json();
+    const action = String(body.action ?? '');
+    const authorization = request.headers.get('Authorization') ?? '';
+    if (action === 'internal_sync_access' && authorization === `Bearer ${SERVICE_ROLE_KEY}`) {
+      const memberIds = Array.isArray(body.memberIds) ? body.memberIds.map(String) : [];
+      const removedMemberIds = Array.isArray(body.removedMemberIds) ? body.removedMemberIds.map(String) : [];
+      return json({ ok: true, warnings: await synchronizeConnectedMembers(memberIds, removedMemberIds) });
+    }
     const context = await actorFromToken(String(body.sessionToken ?? ''));
     if (!context) return json({ error: 'Session is invalid or expired.' }, 401);
-    const action = String(body.action ?? '');
     const targetId = String(body.memberId ?? context.actor.id);
     if (targetId !== context.actor.id && !context.actor.isAdmin) return json({ error: 'Admin access is required.' }, 403);
     const target = context.state.members.find((member) => member.id === targetId);
@@ -345,6 +468,11 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'snapshot') return json({ snapshot: await connectionSnapshot(target.id) });
+
+    if (action === 'sync_all_access') {
+      if (!context.actor.isAdmin) return json({ error: 'Admin access is required.' }, 403);
+      return json({ ok: true, warnings: await synchronizeConnectedMembers([]) });
+    }
 
     if (action === 'sync_access') {
       const { data } = await supabase.from('workspace_github_connections').select('*').eq('member_id', target.id).maybeSingle();

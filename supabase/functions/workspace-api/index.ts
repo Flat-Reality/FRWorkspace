@@ -88,6 +88,15 @@ type AuditEvent = {
   payload?: Record<string, unknown>;
 };
 
+type AccessGroup = {
+  group_key: string;
+  display_name: string;
+  group_kind: 'account_type' | 'role' | 'creative' | 'project';
+  workspace_value: string;
+  entra_group_id: string;
+  github_team_slug: string;
+};
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -278,6 +287,180 @@ async function graphRequest(path: string, token: string, init: RequestInit = {})
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload?.error?.message || `Microsoft Graph returned ${response.status}.`);
   return payload;
+}
+
+async function loadAccessGroups(): Promise<AccessGroup[]> {
+  const { data, error } = await supabase.from('workspace_access_groups').select('*').order('display_name');
+  if (error) throw error;
+  return (data ?? []) as AccessGroup[];
+}
+
+function desiredAccessGroupKeys(member: WorkspaceMember) {
+  const keys = new Set<string>();
+  if (member.contractType === 'CORE TEAM') keys.add('core_team');
+  if (member.contractType === 'INDEPENDENT PARTNER') keys.add('independent_partner');
+
+  const permissions = new Set(member.permissions ?? []);
+  if (member.isAdmin || permissions.has('Admin')) keys.add('administration');
+  if (permissions.has('Community')) keys.add('community');
+  if (permissions.has('Developer')) keys.add('developers');
+  if (permissions.has('HR')) keys.add('hr');
+  if (permissions.has('Operations')) keys.add('operations');
+
+  const details = new Set(member.permissionDetails ?? []);
+  if (details.has('Art')) keys.add('creative_artists');
+  if (details.has('Music') || details.has('Sound Design')) keys.add('creative_audio');
+  if (details.has('Game & Level Design')) keys.add('creative_game_designers');
+
+  const projects = new Set(member.benefitPrograms ?? []);
+  if (projects.has('FR Partners')) keys.add('project_partners');
+  if (projects.has('RAIN HEART')) keys.add('project_rain_heart');
+  if (projects.has('The Nick')) keys.add('project_the_nick');
+  return keys;
+}
+
+function accessComparable(member: WorkspaceMember) {
+  return [...desiredAccessGroupKeys(member)].sort();
+}
+
+async function directEntraGroupIds(member: WorkspaceMember, token: string) {
+  const userId = String(member.entraObjectId || member.entraEmail || '').trim();
+  if (!userId) return new Set<string>();
+  const ids = new Set<string>();
+  let path = `/users/${encodeURIComponent(userId)}/memberOf/microsoft.graph.group?$select=id&$top=999`;
+  while (path) {
+    const page = await graphRequest(path, token) as { value?: Array<{ id?: string }>; '@odata.nextLink'?: string };
+    for (const item of page.value ?? []) if (item.id) ids.add(item.id);
+    const next = page['@odata.nextLink'];
+    path = next ? next.replace('https://graph.microsoft.com/v1.0', '') : '';
+  }
+  return ids;
+}
+
+async function syncMemberAccessGroups(member: WorkspaceMember, groups: AccessGroup[], token: string) {
+  let objectId = String(member.entraObjectId || '').trim();
+  if (!objectId && member.entraEmail) {
+    const profile = await graphRequest(`/users/${encodeURIComponent(member.entraEmail)}?$select=id`, token) as { id?: string };
+    objectId = String(profile.id ?? '');
+  }
+  if (!objectId) return [`${displayName(member)} does not have a resolvable Entra identity.`];
+  const desired = desiredAccessGroupKeys(member);
+  const current = await directEntraGroupIds(member, token);
+  const warnings: string[] = [];
+  for (const group of groups) {
+    const shouldBeMember = desired.has(group.group_key);
+    const isMember = current.has(group.entra_group_id);
+    if (shouldBeMember === isMember) continue;
+    try {
+      if (shouldBeMember) {
+        await graphRequest(`/groups/${group.entra_group_id}/members/$ref`, token, {
+          method: 'POST',
+          body: JSON.stringify({ '@odata.id': `https://graph.microsoft.com/v1.0/directoryObjects/${objectId}` }),
+        });
+      } else {
+        await graphRequest(`/groups/${group.entra_group_id}/members/${objectId}/$ref`, token, { method: 'DELETE' });
+      }
+    } catch (error) {
+      warnings.push(`${group.display_name}: ${error instanceof Error ? error.message : 'Membership could not be synchronized.'}`);
+    }
+  }
+  return warnings;
+}
+
+async function syncGitHubAccess(memberIds: string[], removedMemberIds: string[] = []) {
+  if (!memberIds.length && !removedMemberIds.length) return [] as string[];
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/github-integration`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}`, apikey: SERVICE_ROLE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'internal_sync_access', memberIds, removedMemberIds }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return [payload.error || `GitHub access synchronization returned ${response.status}.`];
+  return Array.isArray(payload.warnings) ? payload.warnings : [];
+}
+
+async function syncChangedAccessGroups(before: WorkspaceState, after: WorkspaceState, actor: WorkspaceMember) {
+  const previous = new Map(before.members.map((member) => [member.id, member]));
+  const changed = after.members.filter((member) => {
+    const oldMember = previous.get(member.id);
+    return !oldMember || JSON.stringify(accessComparable(oldMember)) !== JSON.stringify(accessComparable(member));
+  });
+  const currentIds = new Set(after.members.map((member) => member.id));
+  const removed = before.members.filter((member) => !currentIds.has(member.id));
+  if (!changed.length && !removed.length) return [] as string[];
+  const groups = await loadAccessGroups();
+  const token = await getGraphAccessToken();
+  const warnings: string[] = [];
+  for (const member of changed) {
+    if (member.entraObjectId || member.entraEmail) warnings.push(...await syncMemberAccessGroups(member, groups, token));
+  }
+  for (const member of removed) {
+    warnings.push(...await syncMemberAccessGroups({ ...member, contractType: '', permissions: [], permissionDetails: [], benefitPrograms: [], isAdmin: false }, groups, token));
+  }
+  warnings.push(...await syncGitHubAccess(changed.map((member) => member.id), removed.map((member) => member.id)));
+  await writeAuditLog({
+    eventType: warnings.length ? 'access.groups_sync_partial' : 'access.groups_synced',
+    actor,
+    summary: `Access groups were synchronized for ${changed.length + removed.length} Workspace profile${changed.length + removed.length === 1 ? '' : 's'}.`,
+    payload: { memberIds: changed.map((member) => member.id), removedMemberIds: removed.map((member) => member.id), warnings },
+  });
+  return warnings;
+}
+
+function applyEntraAccess(member: WorkspaceMember, groupKeys: Set<string>) {
+  const managedRoles = new Set(['Admin', 'Community', 'Developer', 'HR', 'Operations', 'Creative']);
+  const permissions = (member.permissions ?? []).filter((value) => !managedRoles.has(value));
+  if (groupKeys.has('administration')) permissions.push('Admin');
+  if (groupKeys.has('community')) permissions.push('Community');
+  if (groupKeys.has('developers')) permissions.push('Developer');
+  if (groupKeys.has('hr')) permissions.push('HR');
+  if (groupKeys.has('operations')) permissions.push('Operations');
+  if (groupKeys.has('creative_artists') || groupKeys.has('creative_audio') || groupKeys.has('creative_game_designers')) permissions.push('Creative');
+
+  const managedDetails = new Set(['Art', 'Music', 'Sound Design', 'Game & Level Design']);
+  const permissionDetails = (member.permissionDetails ?? []).filter((value) => !managedDetails.has(value));
+  if (groupKeys.has('creative_artists')) permissionDetails.push('Art');
+  if (groupKeys.has('creative_audio')) permissionDetails.push('Music', 'Sound Design');
+  if (groupKeys.has('creative_game_designers')) permissionDetails.push('Game & Level Design');
+
+  const managedProjects = new Set(['FR Partners', 'RAIN HEART', 'The Nick']);
+  const benefitPrograms = (member.benefitPrograms ?? []).filter((value) => !managedProjects.has(value));
+  if (groupKeys.has('project_partners')) benefitPrograms.push('FR Partners');
+  if (groupKeys.has('project_rain_heart')) benefitPrograms.push('RAIN HEART');
+  if (groupKeys.has('project_the_nick')) benefitPrograms.push('The Nick');
+
+  let contractType = member.contractType;
+  if (groupKeys.has('core_team')) contractType = 'CORE TEAM';
+  else if (groupKeys.has('independent_partner')) contractType = 'INDEPENDENT PARTNER';
+
+  return { ...member, contractType, permissions, permissionDetails, benefitPrograms, isAdmin: groupKeys.has('administration') };
+}
+
+async function reconcileAccessFromEntra(state: WorkspaceState, actor: WorkspaceMember) {
+  const groups = await loadAccessGroups();
+  const byId = new Map(groups.map((group) => [group.entra_group_id, group.group_key]));
+  const token = await getGraphAccessToken();
+  const members: WorkspaceMember[] = [];
+  const warnings: string[] = [];
+  for (const member of state.members) {
+    if (!member.entraObjectId && !member.entraEmail) {
+      members.push(member);
+      continue;
+    }
+    try {
+      const ids = await directEntraGroupIds(member, token);
+      members.push(applyEntraAccess(member, new Set([...ids].map((id) => byId.get(id)).filter(Boolean) as string[])));
+    } catch (error) {
+      members.push(member);
+      warnings.push(`${displayName(member)}: ${error instanceof Error ? error.message : 'Entra membership could not be read.'}`);
+    }
+  }
+  const nextState = { ...state, members };
+  const { error } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state: nextState, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  warnings.push(...await syncGitHubAccess(members.map((member) => member.id)));
+  await writeAuditLog({ eventType: warnings.length ? 'access.entra_reconcile_partial' : 'access.entra_reconciled', actor, summary: 'Workspace access was reconciled from the canonical Microsoft Entra group matrix.', payload: { warnings } });
+  return { state: nextState, warnings };
 }
 
 async function syncMemberToEntra(member: WorkspaceMember) {
@@ -775,6 +958,13 @@ Deno.serve(async (request) => {
       return json({ ok: true, warnings });
     }
 
+    if (action === 'reconcile_access_from_entra') {
+      if (!context.actor.isAdmin) return json({ error: 'Admin access is required.' }, 403);
+      const result = await reconcileAccessFromEntra(context.state, context.actor);
+      const actor = result.state.members.find((member) => member.id === context.actor.id) ?? context.actor;
+      return json({ state: scrubState(result.state, actor), warnings: result.warnings });
+    }
+
     if (action === 'load') {
       const state = await touchMemberLastSeen(context.state, context.actor.id);
       const actor = state.members.find((member) => member.id === context.actor.id) ?? context.actor;
@@ -835,7 +1025,8 @@ Deno.serve(async (request) => {
       if (error) throw error;
       await auditStateChanges(context.state, nextState, context.actor);
       const entraSyncWarnings = context.actor.isAdmin ? await syncChangedEntraMembers(context.state, nextState, context.actor) : [];
-      return json({ state: scrubState(nextState, context.actor), entraSyncWarnings });
+      const accessSyncWarnings = context.actor.isAdmin ? await syncChangedAccessGroups(context.state, nextState, context.actor) : [];
+      return json({ state: scrubState(nextState, context.actor), entraSyncWarnings: [...entraSyncWarnings, ...accessSyncWarnings] });
     }
 
     return json({ error: 'Unknown action.' }, 400);
