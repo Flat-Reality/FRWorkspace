@@ -1756,23 +1756,56 @@ function GaugeCard({ label, value, suffix = '%', colors = true, displayValue }: 
 function SkillsPanel({ member, editable = false, admin = false, updateMember }: { member: WorkspaceMember; editable?: boolean; admin?: boolean; updateMember?: (changes: Partial<WorkspaceMember>) => void }) {
   const verified = new Set(member.endorsedSkills ?? []);
   const skills = member.skills ?? [];
-  const [draft, setDraft] = useState('');
-  function addSkill() {
-    const next = draft.trim();
-    if (!next || skills.some((skill) => skill.toLowerCase() === next.toLowerCase()) || !updateMember) return;
-    updateMember({ skills: [...skills, next] });
-    setDraft('');
+  const software = member.software.split(',').map((item) => item.trim()).filter(Boolean);
+  const languages = member.languages.split(',').map((item) => item.trim()).filter(Boolean);
+  const [drafts, setDrafts] = useState({ skills: '', software: '', languages: '' });
+
+  function addItem(key: 'skills' | 'software' | 'languages', items: string[]) {
+    const next = drafts[key].trim();
+    if (!next || items.some((item) => item.toLowerCase() === next.toLowerCase()) || !updateMember) return;
+    if (key === 'skills') updateMember({ skills: [...skills, next] });
+    if (key === 'software') updateMember({ software: [...software, next].join(', ') });
+    if (key === 'languages') updateMember({ languages: [...languages, next].join(', ') });
+    setDrafts((current) => ({ ...current, [key]: '' }));
   }
+
   function toggleVerified(skill: string) {
     if (!admin || !updateMember) return;
     updateMember({ endorsedSkills: verified.has(skill) ? [...verified].filter((item) => item !== skill) : [...verified, skill] });
   }
+
   const groups = [
-    { title: 'Skills', items: skills },
-    { title: 'Software', items: member.software.split(',').map((item) => item.trim()).filter(Boolean) },
-    { title: 'Languages', items: member.languages.split(',').map((item) => item.trim()).filter(Boolean) },
+    { key: 'skills' as const, title: 'Skills', items: skills, placeholder: 'Add a skill' },
+    { key: 'software' as const, title: 'Software Knowledge', items: software, placeholder: 'Add software' },
+    { key: 'languages' as const, title: 'Languages', items: languages, placeholder: 'Add a language' },
   ];
-  return <section className="rounded-xl border border-line bg-paper p-5 shadow-soft sm:p-6"><div className="flex items-center gap-3"><Sparkles className="text-forest" size={20} /><h2 className="text-xl font-semibold">Skills</h2></div><div className="mt-5 grid gap-5">{groups.map((group) => <div key={group.title}><p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">{group.title}</p><div className="mt-3 flex flex-wrap gap-2">{group.items.map((item) => <button type="button" key={item} disabled={!admin} onClick={() => toggleVerified(item)} className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition ${verified.has(item) ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-line bg-mist text-zinc-600'} ${admin ? 'cursor-pointer hover:border-sky-300' : 'cursor-default'}`}>{verified.has(item) && <BadgeCheck size={15} />}{item}</button>)}{!group.items.length && <span className="text-sm text-zinc-400">Nothing added yet</span>}</div></div>)}</div>{editable && updateMember && <div className="mt-5 flex gap-2 border-t border-line pt-5"><input className="h-11 min-w-0 flex-1 rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-forest" value={draft} placeholder="Add a skill" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addSkill(); } }} /><button className="h-11 rounded-lg bg-ink px-4 text-sm font-semibold text-white" onClick={addSkill}>Add</button></div>}</section>;
+
+  return (
+    <section className="rounded-xl border border-line bg-paper p-5 shadow-soft sm:p-6">
+      <div className="flex items-center gap-3"><Sparkles className="text-forest" size={20} /><h2 className="text-xl font-semibold">Skills</h2></div>
+      <div className="mt-5 grid gap-6">
+        {groups.map((group) => (
+          <div key={group.key}>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">{group.title}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {group.items.map((item) => (
+                <button type="button" key={item} disabled={!admin} onClick={() => toggleVerified(item)} className={`inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${verified.has(item) ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-line bg-mist text-zinc-600'} ${admin ? 'cursor-pointer hover:border-sky-300' : 'cursor-default'}`}>
+                  {verified.has(item) && <BadgeCheck size={15} />}{item}
+                </button>
+              ))}
+              {!group.items.length && <span className="text-sm text-zinc-400">Nothing added yet</span>}
+            </div>
+            {editable && updateMember && (
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input className="h-11 min-w-0 flex-1 rounded-lg border border-line bg-paper px-3 text-sm outline-none focus:border-forest" value={drafts[group.key]} placeholder={group.placeholder} onChange={(event) => setDrafts((current) => ({ ...current, [group.key]: event.target.value }))} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addItem(group.key, group.items); } }} />
+                <button className="h-11 rounded-lg bg-ink px-4 text-sm font-semibold text-white" onClick={() => addItem(group.key, group.items)}>Add</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function ProjectCards({ member }: { member: WorkspaceMember }) {
