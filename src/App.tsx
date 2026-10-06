@@ -1272,6 +1272,10 @@ export default function App() {
               workRecords={workRecords}
               upwork={upworkSnapshot}
               setView={setView}
+              openProfileSkills={() => {
+                setProfileTab('skills');
+                setView('profile');
+              }}
             />
           )}
           {view === 'profile' && <Profile member={currentMember} avatarUrl={entraAvatarUrl || upworkSnapshot.profile?.photoUrl || currentMember.githubAvatarUrl || ''} records={workRecords.filter((record) => record.memberId === currentMember.id)} upwork={upworkSnapshot} upworkStatus={upworkStatus} refreshUpwork={() => void refreshUpwork(currentMember.id, true)} updateCurrentMember={updateCurrentMember} onLogout={signOut} setView={setView} tab={profileTab} setTab={setProfileTab} />}
@@ -1446,6 +1450,23 @@ function RecoveryWizard({ members, updateMembers, onClose }: { members: Workspac
   );
 }
 
+function hasOnboardingSkills(member: WorkspaceMember) {
+  return Boolean(
+    member.skills?.some((skill) => skill.trim())
+    || member.software.split(',').some((software) => software.trim())
+    || member.languages.split(',').some((language) => language.trim()),
+  );
+}
+
+function onboardingChecklist(member: WorkspaceMember) {
+  return [
+    { id: 'entra', label: 'Microsoft Entra ID connected', done: Boolean(member.entraSetupCompleted) },
+    { id: 'github', label: 'GitHub connected', done: Boolean(member.githubConnected) },
+    { id: 'documents', label: 'NDA and GDPR signed', done: member.onboarding.ndaSigned && member.onboarding.gdprSigned },
+    { id: 'skills', label: 'Skills, software or languages added', done: hasOnboardingSkills(member) },
+  ];
+}
+
 function Dashboard({
   member,
   currentLevel,
@@ -1456,6 +1477,7 @@ function Dashboard({
   workRecords,
   upwork,
   setView,
+  openProfileSkills,
 }: {
   member: WorkspaceMember;
   currentLevel: Level;
@@ -1466,7 +1488,10 @@ function Dashboard({
   workRecords: WorkRecord[];
   upwork: UpworkSnapshot;
   setView: (view: View) => void;
+  openProfileSkills: () => void;
 }) {
+  const [isGitHubConnecting, setIsGitHubConnecting] = useState(false);
+  const [onboardingMessage, setOnboardingMessage] = useState('');
   const pendingUserRequest = workRecords.find((record) => record.memberId === member.id && record.type === 'explanation_request' && !record.explanationText);
   const unreadExplanationCount = member.isAdmin ? workRecords.filter((record) => record.type === 'explanation_request' && record.explanationText).length : 0;
   const isSuspended = member.status === 'suspended';
@@ -1481,6 +1506,24 @@ function Dashboard({
     if (isUpworkContract(member) && link.title === 'Contact Head Office') return false;
     return true;
   });
+  const onboardingSteps = onboardingChecklist(member);
+  const completedOnboardingSteps = onboardingSteps.filter((step) => step.done).length;
+
+  async function beginGitHubConnection() {
+    const token = getStoredSession()?.token;
+    if (!token) {
+      setOnboardingMessage('Your Workspace session has expired. Please sign in again.');
+      return;
+    }
+    setIsGitHubConnecting(true);
+    setOnboardingMessage('');
+    try {
+      await connectGitHub(token);
+    } catch (error) {
+      setOnboardingMessage(error instanceof Error ? error.message : 'GitHub connection could not be started.');
+      setIsGitHubConnecting(false);
+    }
+  }
   const inactiveStatus = member.status !== 'active' && member.status !== 'suspended'
     ? {
         sick_leave: {
@@ -1561,12 +1604,38 @@ function Dashboard({
       )}
 
       {!isSuspended && !member.onboarding.completed && (
-        <section className="rounded-xl border border-forest bg-forest/5 p-6 shadow-soft">
-          <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white text-2xl shadow-soft">👋</div>
-            <div>
-              <h2 className="text-2xl font-semibold">Complete onboarding</h2>
-              <p className="mt-2 text-zinc-600">Earn 100 XP.</p>
+        <section className="onboarding-progress overflow-hidden rounded-xl border border-forest/20 p-5 shadow-soft sm:p-6">
+          <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start gap-4">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white text-forest shadow-soft"><Sparkles size={22} /></span>
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Onboarding Journey</p>
+                  <h2 className="mt-1 text-2xl font-semibold">Complete onboarding</h2>
+                  <p className="mt-1 text-sm text-zinc-600">{completedOnboardingSteps} of {onboardingSteps.length} steps completed. Earn 100 XP after confirmation.</p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-3">
+                {onboardingSteps.map((step) => (
+                  <div key={step.id} className="flex flex-col gap-3 rounded-lg border border-white/70 bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${step.done ? 'bg-emerald-500 text-white' : 'border border-line bg-paper text-zinc-400'}`}>
+                        {step.done ? <Check size={15} /> : <span className="h-2 w-2 rounded-full bg-current" />}
+                      </span>
+                      <span className={step.done ? 'font-medium' : 'text-zinc-600'}>{step.label}</span>
+                    </div>
+                    {step.id === 'github' && !step.done && (
+                      <button type="button" disabled={isGitHubConnecting} onClick={() => void beginGitHubConnection()} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60">
+                        <Github size={18} /> {isGitHubConnecting ? 'Connecting...' : 'Connect GitHub'}
+                      </button>
+                    )}
+                    {step.id === 'skills' && !step.done && (
+                      <button type="button" onClick={openProfileSkills} className="inline-flex h-10 items-center justify-center rounded-lg border border-line bg-paper px-4 text-sm font-semibold transition hover:border-forest hover:text-forest">Add skills</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {onboardingMessage && <p className="mt-3 text-sm font-medium text-red-600">{onboardingMessage}</p>}
             </div>
           </div>
         </section>
@@ -3368,11 +3437,7 @@ function MemberEditor({
 
 function OnboardingProgressCard({ member, updateMember }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
   if (member.onboarding.completed) return null;
-  const steps = [
-    { label: 'Microsoft Entra ID connected', done: Boolean(member.entraSetupCompleted) },
-    { label: 'GitHub connected', done: Boolean(member.githubConnected) },
-    { label: 'NDA and GDPR signed', done: member.onboarding.ndaSigned && member.onboarding.gdprSigned },
-  ];
+  const steps = onboardingChecklist(member);
   const ready = steps.every((step) => step.done);
   function confirm() {
     if (!ready) return;
@@ -3893,7 +3958,7 @@ function DocumentCheck({ title, checked, url, onChange }: { title: string; check
 
 const partnerStatusOptions: Array<{ value: PartnerStatus; label: string; icon: LucideIcon; className: string }> = [
   { value: 'available', label: 'Available', icon: Zap, className: 'text-emerald-700' },
-  { value: 'working_hours', label: 'Busy', icon: Clock, className: 'text-amber-600' },
+  { value: 'working_hours', label: 'Busy', icon: Clock, className: 'text-yellow-500' },
   { value: 'inactive', label: 'Inactive', icon: CircleOff, className: 'text-zinc-500' },
 ];
 
@@ -3959,7 +4024,7 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
   function updatePartnerStatus(member: WorkspaceMember, status: PartnerStatus) {
     updatePartner(member.id, {
       partnerStatus: status,
-      completedTasks: status === 'working_hours' && member.partnerStatus !== 'working_hours' ? member.completedTasks + 1 : member.completedTasks,
+      completedTasks: member.partnerStatus === 'working_hours' && status === 'available' ? member.completedTasks + 1 : member.completedTasks,
     });
   }
 
@@ -3970,7 +4035,13 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
       const effectiveStatus: PartnerStatus = activeContract ? 'working_hours' : member.partnerStatus;
       return { member, snapshot, activeContract, effectiveStatus, qualityIndex: calculatePartnerQualityIndex(member, snapshot) };
     })
-    .sort((left, right) => right.qualityIndex - left.qualityIndex || partnerStatusPriority(left.effectiveStatus) - partnerStatusPriority(right.effectiveStatus) || displayName(left.member).localeCompare(displayName(right.member)));
+    .sort((left, right) => {
+      const inactiveOrder = Number(left.effectiveStatus === 'inactive') - Number(right.effectiveStatus === 'inactive');
+      return inactiveOrder
+        || right.qualityIndex - left.qualityIndex
+        || partnerStatusPriority(left.effectiveStatus) - partnerStatusPriority(right.effectiveStatus)
+        || displayName(left.member).localeCompare(displayName(right.member));
+    });
 
   return (
     <div className="grid gap-5">
