@@ -229,7 +229,11 @@ function projectLabel(project: BenefitProgram) {
   return project === 'FR Partners' ? 'Partners™' : project;
 }
 
-function calculatePartnerQualityIndex(member: WorkspaceMember, snapshot: UpworkSnapshot) {
+function openExplanationRequestCount(records: WorkRecord[], memberId: string) {
+  return records.filter((record) => record.memberId === memberId && record.type === 'explanation_request' && !record.explanationText).length;
+}
+
+function calculatePartnerQualityIndex(member: WorkspaceMember, snapshot: UpworkSnapshot, openExplanationRequests = 0) {
   const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
   const strikes = clamp(Number(member.strikeSystem) || 0, 0, 3);
   const reliabilityScore = [35, 24, 10, 0][strikes];
@@ -252,7 +256,12 @@ function calculatePartnerQualityIndex(member: WorkspaceMember, snapshot: UpworkS
     ? 3 + Math.min(4, closedContracts * 2) + (hasActiveContract ? 1 : 0) + Math.min(2, trackedHours / 20)
     : 0;
 
-  return Math.round(clamp(reliabilityScore + deliveryScore + tenureScore + profileScore + platformScore, 0, 100));
+  const baseScore = clamp(reliabilityScore + deliveryScore + tenureScore + profileScore + platformScore, 0, 100);
+  const endorsedSkillCount = new Set((member.endorsedSkills ?? []).map((skill) => skill.trim().toLowerCase()).filter(Boolean)).size;
+  const endorsedSkillBonus = 0.06 * (1 - Math.exp(-endorsedSkillCount / 5));
+  const explanationPenalty = 0.15 * (1 - Math.exp(-Math.max(0, openExplanationRequests) / 4));
+
+  return Math.round(clamp(baseScore * (1 + endorsedSkillBonus) * (1 - explanationPenalty), 0, 100));
 }
 
 function partnerStatusPriority(status: PartnerStatus) {
@@ -1888,7 +1897,7 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
   const [githubMessage, setGitHubMessage] = useState('');
   const [isGitHubBusy, setIsGitHubBusy] = useState(false);
   const partner = isFrPartnersConnected(member);
-  const index = calculatePartnerQualityIndex(member, upwork);
+  const index = calculatePartnerQualityIndex(member, upwork, openExplanationRequestCount(records, member.id));
   const health = Math.max(0, 3 - member.strikeSystem);
   const trackedHours = upwork.timeEntries.reduce((total, entry) => total + entry.hours, 0);
   async function beginUpworkConnection() { const token = getStoredSession()?.token; if (!token) return; setIsUpworkBusy(true); try { await connectUpwork(token); } catch (error) { window.alert(error instanceof Error ? error.message : 'Upwork connection could not be started.'); setIsUpworkBusy(false); } }
@@ -3141,7 +3150,7 @@ function Admin({
   const [module, setModule] = useState<AdminModule>(() => window.location.hash.startsWith('#/hr') ? 'hr' : 'home');
 
   if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} impersonateMember={impersonateMember} resetMemberPassword={resetMemberPassword} onFocusModeChange={onFocusModeChange} onBack={() => { window.location.hash = ''; setModule('home'); }} />;
-  if (module === 'partners') return <AdminPartners members={members} setMembers={setMembers} onBack={() => setModule('home')} />;
+  if (module === 'partners') return <AdminPartners members={members} workRecords={workRecords} setMembers={setMembers} onBack={() => setModule('home')} />;
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
   if (module === 'logs') return <AdminLogs members={members} onBack={() => setModule('home')} />;
@@ -3419,7 +3428,7 @@ function MemberEditor({
           ))}
         </div>
       </section>
-      {tab === 'overview' && <AdminOverviewTab member={member} avatarUrl={memberAvatar || memberUpwork.profile?.photoUrl || member.githubAvatarUrl || ''} upwork={memberUpwork} updateMember={updateMember} />}
+      {tab === 'overview' && <AdminOverviewTab member={member} records={records} avatarUrl={memberAvatar || memberUpwork.profile?.photoUrl || member.githubAvatarUrl || ''} upwork={memberUpwork} updateMember={updateMember} />}
       {tab === 'contact' && <AdminContactTab member={member} updateMember={updateMember} />}
       {tab === 'records' && <AdminRecordsTab member={member} records={records} setWorkRecords={setWorkRecords} />}
       {tab === 'access' && <AdminAccessRoleTab member={member} updateMember={updateMember} setMembers={setMembers} impersonateMember={impersonateMember} resetMemberPassword={resetMemberPassword} />}
@@ -3447,9 +3456,9 @@ function OnboardingProgressCard({ member, updateMember }: { member: WorkspaceMem
   return <section className="onboarding-progress overflow-hidden rounded-xl border border-forest/20 p-6 shadow-soft"><div className="flex flex-col justify-between gap-5 md:flex-row md:items-center"><div><p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Onboarding Journey</p><h2 className="mt-2 text-2xl font-semibold">Complete employee onboarding</h2><div className="mt-5 grid gap-3">{steps.map((step) => <div key={step.label} className="flex items-center gap-3"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${step.done ? 'bg-emerald-500 text-white' : 'border border-line bg-paper text-zinc-400'}`}>{step.done ? <Check size={15} /> : <span className="h-2 w-2 rounded-full bg-current" />}</span><span className={step.done ? 'font-medium' : 'text-zinc-500'}>{step.label}</span></div>)}</div></div><button disabled={!ready} className="h-11 rounded-lg bg-forest px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40" onClick={confirm}>Confirm completion · +100 XP</button></div></section>;
 }
 
-function AdminOverviewTab({ member, avatarUrl, upwork, updateMember }: { member: WorkspaceMember; avatarUrl: string; upwork: UpworkSnapshot; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
+function AdminOverviewTab({ member, records, avatarUrl, upwork, updateMember }: { member: WorkspaceMember; records: WorkRecord[]; avatarUrl: string; upwork: UpworkSnapshot; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
   const partner = isFrPartnersConnected(member);
-  const index = calculatePartnerQualityIndex(member, upwork);
+  const index = calculatePartnerQualityIndex(member, upwork, openExplanationRequestCount(records, member.id));
   const health = Math.max(0, 3 - member.strikeSystem);
   const trackedHours = upwork.timeEntries.reduce((total, entry) => total + entry.hours, 0);
   const activeContract = upwork.contracts.find((contract) => contract.status === 'Active');
@@ -4001,7 +4010,7 @@ function PartnerStatusPicker({ member, onChange }: { member: WorkspaceMember; on
   );
 }
 
-function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMember[]; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; onBack: () => void }) {
+function AdminPartners({ members, workRecords, setMembers, onBack }: { members: WorkspaceMember[]; workRecords: WorkRecord[]; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; onBack: () => void }) {
   const partnerMembers = members.filter((member) => isFrPartnersConnected(member) && member.status !== 'suspended');
   const [snapshots, setSnapshots] = useState<Record<string, UpworkSnapshot>>({});
 
@@ -4033,7 +4042,7 @@ function AdminPartners({ members, setMembers, onBack }: { members: WorkspaceMemb
       const snapshot = snapshots[member.id] ?? EMPTY_UPWORK_SNAPSHOT;
       const activeContract = snapshot.contracts.find((contract) => contract.status === 'Active');
       const effectiveStatus: PartnerStatus = activeContract ? 'working_hours' : member.partnerStatus;
-      return { member, snapshot, activeContract, effectiveStatus, qualityIndex: calculatePartnerQualityIndex(member, snapshot) };
+      return { member, snapshot, activeContract, effectiveStatus, qualityIndex: calculatePartnerQualityIndex(member, snapshot, openExplanationRequestCount(workRecords, member.id)) };
     })
     .sort((left, right) => {
       const inactiveOrder = Number(left.effectiveStatus === 'inactive') - Number(right.effectiveStatus === 'inactive');

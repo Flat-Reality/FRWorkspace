@@ -105,6 +105,13 @@ export const initialGuidePages: GuidePage[] = [
       '# Workspace Guide\n\nUse this area for internal documentation, operating rules, onboarding notes, and team resources.\n\n## Editing\n\nAdministrators can create and update guide pages from the Admin area.',
     order: 1,
   },
+  {
+    id: 'guide-partner-index',
+    title: 'What is Partner Index?',
+    content:
+      '# What is Partner Index?\n\nPartner Index is a live quality signal for people assigned to Partners. It brings several work and profile signals together so the team can understand readiness, reliability, and recent contribution at a glance.\n\n## What helps your Index\n\nReliable delivery and completed assignments strengthen the Index over time. A complete professional profile, an established work history, and verified activity from connected work platforms also contribute.\n\nEndorsed skills add a small confidence boost. This bonus is deliberately limited, so collecting skill tags cannot outweigh real delivery and reliability.\n\n## What can lower it\n\nActive strikes have the strongest negative effect. Open requests for explanation also apply a small temporary reduction while the team is waiting for a response. Once an explanation is submitted, that temporary effect is removed automatically.\n\n## Fair by design\n\nThe Index uses balanced limits and diminishing effects. No single profile field, skill list, or connected platform can dominate the result. Availability status helps order the Partners board but does not directly rewrite the quality score; Inactive profiles are shown at the end of the list.\n\nThe exact weighting remains an internal operational model and may evolve as Workspace gains better verified data. Partner Index is a planning signal, not a measure of personal value and not a replacement for human review.',
+    order: 2,
+  },
 ];
 
 export const initialMembers: WorkspaceMember[] = [
