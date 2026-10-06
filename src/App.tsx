@@ -38,6 +38,7 @@ import {
   KeyRound,
   Link2,
   LayoutDashboard,
+  Lock,
   Mail,
   MapPin,
   MessageCircle,
@@ -1312,7 +1313,7 @@ export default function App() {
           {view === 'signedDocuments' && <SignedDocuments member={currentMember} />}
           {view === 'files' && <FilesPage member={currentMember} fileProjects={fileProjects} setFileProjects={setFileProjects} />}
           {view === 'benefits' && <Placeholder title="Benefits" text="We are working on integrating this feature into Workspace!" />}
-          {view === 'installs' && <Placeholder title="Installs" text="Install access will be added here later." />}
+          {view === 'installs' && <InstallsPage member={currentMember} />}
           {view === 'guides' && <Guides pages={guidePages} />}
           {view === 'admin' && currentMember.isAdmin && (
             <Admin
@@ -3112,6 +3113,66 @@ function FilesPage({ member, fileProjects, setFileProjects }: { member: Workspac
               )}
             </div>
           </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const installPackages = [
+  {
+    name: 'GDK',
+    description: 'Microsoft\'s game development kit for building, testing, and publishing games across Xbox and Windows.',
+    url: 'https://www.microsoft.com/en-us/software-download/gdk#section_GameCore',
+  },
+  {
+    name: 'Xbox Add-ins',
+    description: 'Additional Xbox development integrations and tools for supported engines and production workflows.',
+    url: 'https://www.microsoft.com/en-us/software-download/gdk#section_addins',
+  },
+  {
+    name: 'ID@XBOX GREENROOM (Conference Material)',
+    description: 'Conference presentations and technical resources prepared for approved ID@Xbox game developers.',
+    url: 'https://www.microsoft.com/en-us/software-download/gdk#section_ConferenceMaterial',
+  },
+];
+
+function InstallsPage({ member }: { member: WorkspaceMember }) {
+  const canDownload = member.onboarding.ndaSigned && (member.permissions ?? []).includes('Developer');
+
+  return (
+    <section className="rounded-xl border border-line bg-paper p-4 shadow-soft sm:p-6">
+      <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Workspace Installs</p>
+      <h1 className="mt-3 text-3xl font-semibold">Installs</h1>
+      <p className="mt-2 text-sm text-zinc-600">Approved development packages and internal software resources.</p>
+
+      <article className="mt-6 flex items-start gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:p-5">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700"><AlertTriangle size={22} /></span>
+        <div>
+          <h2 className="font-semibold text-amber-950">Sensitive Information Alert</h2>
+          <p className="mt-2 text-sm leading-6 text-amber-900">Be careful when handling sensitive information and use trusted devices. Each installed package is signed with your identity, so copying, distribution, or unintended use violates the applicable NDA and may be punishable under Directive (EU) 2016/943, including fines and up to four years of imprisonment where applicable.</p>
+        </div>
+      </article>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        {installPackages.map((item) => (
+          <article key={item.name} className="flex min-h-48 flex-col rounded-xl border border-line bg-mist p-5">
+            <div className="flex items-start gap-4">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-white"><img className="h-full w-full object-contain" src={publicAsset('resources/logos/xbox.png')} alt="" /></span>
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold">{item.name}</h2>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Provider: Microsoft Corporation</p>
+                <p className="mt-3 text-sm leading-6 text-zinc-600">{item.description}</p>
+              </div>
+            </div>
+            <div className="mt-auto pt-5">
+              {canDownload ? (
+                <a className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-forest px-4 text-sm font-semibold text-white" href={item.url} target="_blank" rel="noreferrer"><Download size={17} />Download</a>
+              ) : (
+                <button className="inline-flex h-10 cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-zinc-300 px-4 text-sm font-semibold text-zinc-600" type="button" disabled><Lock size={16} />Download</button>
+              )}
+            </div>
+          </article>
         ))}
       </div>
     </section>
