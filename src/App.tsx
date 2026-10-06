@@ -3122,18 +3122,43 @@ function FilesPage({ member, fileProjects, setFileProjects }: { member: Workspac
 const installPackages = [
   {
     name: 'GDK',
+    provider: 'Microsoft Corporation',
+    icon: 'resources/logos/xbox.png',
     description: 'Microsoft\'s game development kit for building, testing, and publishing games across Xbox and Windows.',
     url: 'https://www.microsoft.com/en-us/software-download/gdk#section_GameCore',
+    unrestricted: false,
   },
   {
     name: 'Xbox Add-ins',
+    provider: 'Microsoft Corporation',
+    icon: 'resources/logos/xbox.png',
     description: 'Additional Xbox development integrations and tools for supported engines and production workflows.',
     url: 'https://www.microsoft.com/en-us/software-download/gdk#section_addins',
+    unrestricted: false,
   },
   {
     name: 'ID@XBOX GREENROOM (Conference Material)',
+    provider: 'Microsoft Corporation',
+    icon: 'resources/logos/xbox.png',
     description: 'Conference presentations and technical resources prepared for approved ID@Xbox game developers.',
     url: 'https://www.microsoft.com/en-us/software-download/gdk#section_ConferenceMaterial',
+    unrestricted: false,
+  },
+  {
+    name: 'Steamworks API',
+    provider: 'Valve Corporation',
+    icon: 'resources/logos/steamworks.png',
+    description: 'Official Steamworks SDK downloads and platform integration resources for Steam partners.',
+    url: 'https://partner.steamgames.com/downloads/list',
+    unrestricted: true,
+  },
+  {
+    name: 'Steamworks.NET',
+    provider: 'Steamworks.NET',
+    icon: 'resources/logos/steamworks.png',
+    description: 'A managed Steamworks API wrapper packaged for direct use in Unity projects.',
+    url: 'https://github.com/rlabrecque/Steamworks.NET/releases/download/2025.164.1/Steamworks.NET_2025.164.1.unitypackage',
+    unrestricted: true,
   },
 ];
 
@@ -3158,15 +3183,15 @@ function InstallsPage({ member }: { member: WorkspaceMember }) {
         {installPackages.map((item) => (
           <article key={item.name} className="flex min-h-48 flex-col rounded-xl border border-line bg-mist p-5">
             <div className="flex items-start gap-4">
-              <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-white"><img className="h-full w-full object-contain" src={publicAsset('resources/logos/xbox.png')} alt="" /></span>
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-white"><img className="h-full w-full object-contain" src={publicAsset(item.icon)} alt="" /></span>
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold">{item.name}</h2>
-                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Provider: Microsoft Corporation</p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Provider: {item.provider}</p>
                 <p className="mt-3 text-sm leading-6 text-zinc-600">{item.description}</p>
               </div>
             </div>
             <div className="mt-auto pt-5">
-              {canDownload ? (
+              {item.unrestricted || canDownload ? (
                 <a className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-forest px-4 text-sm font-semibold text-white" href={item.url} target="_blank" rel="noreferrer"><Download size={17} />Download</a>
               ) : (
                 <button className="inline-flex h-10 cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-zinc-300 px-4 text-sm font-semibold text-zinc-600" type="button" disabled><Lock size={16} />Download</button>
