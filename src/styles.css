@@ -261,6 +261,140 @@ button {
   background: linear-gradient(120deg, rgb(127 0 255 / 0.12), rgb(var(--color-paper)) 58%, rgb(22 134 200 / 0.1));
 }
 
+.hr-member-tabs {
+  scrollbar-width: none;
+}
+
+.hr-member-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  html,
+  body,
+  #root {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  input,
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .workspace-shell {
+    width: 100%;
+    gap: 1rem;
+  }
+
+  .workspace-content {
+    min-width: 0;
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
+
+  .profile-viva,
+  .hr-admin-page,
+  .hr-member-editor {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .profile-viva section,
+  .hr-member-editor section,
+  .hr-member-editor article {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .profile-viva section:not(.member-hero),
+  .hr-member-editor > section:not(.member-hero) {
+    padding: 1rem;
+  }
+
+  .member-hero > div {
+    align-items: flex-start;
+  }
+
+  .member-hero h1 {
+    font-size: 1.75rem;
+    line-height: 1.15;
+  }
+
+  .profile-tabs {
+    margin-inline: -0.25rem;
+    scroll-snap-type: x proximity;
+  }
+
+  .profile-tabs button {
+    scroll-snap-align: start;
+  }
+
+  .kpi-card {
+    min-height: 10.5rem;
+  }
+
+  .kpi-gauge {
+    width: 6.25rem;
+    height: 6.25rem;
+  }
+
+  .kpi-gauge > div {
+    width: 4.65rem;
+    height: 4.65rem;
+  }
+
+  .hr-wizard {
+    min-height: 100dvh;
+    place-items: stretch;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 0;
+  }
+
+  .hr-wizard-card {
+    width: 100%;
+    min-height: 100dvh;
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+    box-shadow: none;
+  }
+
+  .hr-wizard-card button,
+  .hr-wizard-card label,
+  .hr-wizard-card span {
+    min-width: 0;
+  }
+
+  .hr-wizard-card .min-h-28 {
+    min-height: 6rem;
+    padding: 1rem;
+  }
+
+  .hr-wizard-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    margin-inline: -1rem;
+    margin-bottom: -1rem;
+    padding: 0.75rem 1rem max(0.75rem, env(safe-area-inset-bottom));
+    border-top: 1px solid rgb(var(--color-line));
+    background: rgb(var(--color-paper) / 0.96);
+    backdrop-filter: blur(16px);
+  }
+
+  .hr-wizard-complete h1 {
+    padding-inline: 1rem;
+    font-size: 2rem;
+    line-height: 1.15;
+  }
+}
+
 @keyframes viva-content-in {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }

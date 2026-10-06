@@ -1728,15 +1728,15 @@ function MemberHero({ member, avatarUrl, compact = false }: { member: WorkspaceM
   const status = memberStatusStyle(member.status);
   const StatusIcon = status.icon;
   return (
-    <section className={`member-hero rounded-xl border border-line bg-paper shadow-soft ${compact ? 'p-5' : 'p-6 sm:p-8'}`}>
+    <section className={`member-hero rounded-xl border border-line bg-paper shadow-soft ${compact ? 'p-4 sm:p-5' : 'p-4 sm:p-8'}`}>
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
         <div className="relative w-fit">
           <ProfileAvatar src={avatarUrl} name={displayName(member)} />
           <span className={`absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border-4 border-paper text-white ${status.color}`} title={status.label}><StatusIcon size={14} strokeWidth={2.6} /></span>
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 text-3xl font-semibold sm:text-4xl"><span className="truncate">{displayName(member)}</span><VerifiedMark member={member} /></h1>
-          <p className="mt-2 text-base text-zinc-600">{[member.seniority, member.jobRole].filter(Boolean).join(' · ') || 'Role not assigned'} <span className="mx-2 text-zinc-300">•</span> {isCoreTeam(member) ? 'Core Team' : 'Independent Partner'}</p>
+          <h1 className="flex min-w-0 items-center gap-2 text-3xl font-semibold sm:text-4xl"><span className="min-w-0 break-words">{displayName(member)}</span><VerifiedMark member={member} /></h1>
+          <p className="mt-2 break-words text-sm text-zinc-600 sm:text-base">{[member.seniority, member.jobRole].filter(Boolean).join(' · ') || 'Role not assigned'} <span className="mx-2 text-zinc-300">•</span> {isCoreTeam(member) ? 'Core Team' : 'Independent Partner'}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             {member.entraEmail && <span className="inline-flex h-9 items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 text-sm font-semibold text-sky-700"><img className="h-5 w-5" src={ENTRA_ICON} alt="" />Entra ID</span>}
             {member.benefitPrograms.map((project) => <span key={project} className="inline-flex h-9 items-center rounded-full border border-line bg-mist px-3 text-sm font-semibold">{projectLabel(project)}</span>)}
@@ -3150,7 +3150,7 @@ function HrAdmin({
   }
 
   return (
-    <div className={`grid gap-6 ${isOnboarding ? 'min-h-screen' : selectedMember ? 'p-4 lg:p-6' : ''}`}>
+    <div className={`hr-admin-page grid gap-4 sm:gap-6 ${isOnboarding ? 'min-h-screen' : selectedMember ? 'p-3 sm:p-4 lg:p-6' : ''}`}>
       {isOnboarding ? (
         <HrOnboardingWizard
           members={members}
@@ -3162,7 +3162,7 @@ function HrAdmin({
       {!selectedMember && <BackButton onBack={onBack} />}
       {!selectedMember ? (
         <>
-          <section className="rounded-xl border border-line bg-paper p-6 shadow-soft">
+          <section className="rounded-xl border border-line bg-paper p-4 shadow-soft sm:p-6">
             <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">HR</p>
@@ -3296,12 +3296,18 @@ function MemberEditor({
   ];
 
   return (
-    <div className="grid gap-5">
+    <div className="hr-member-editor grid min-w-0 gap-4 sm:gap-5">
       <button className="justify-self-start rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-zinc-600" onClick={onBack}>
         Back to people
       </button>
       <MemberHero member={member} avatarUrl={memberAvatar || memberUpwork.profile?.photoUrl || member.githubAvatarUrl || ''} compact />
-      <section className="rounded-xl border border-line bg-paper p-2 shadow-soft">
+      <label className="grid gap-2 rounded-xl border border-line bg-paper p-3 shadow-soft sm:hidden">
+        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Profile section</span>
+        <select className="h-11 w-full rounded-lg border border-line bg-paper px-3 text-sm font-semibold outline-none focus:border-forest" value={tab} onChange={(event) => setTab(event.target.value as HrTab)}>
+          {tabs.map(([key, , label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+      </label>
+      <section className="hr-member-tabs hidden rounded-xl border border-line bg-paper p-2 shadow-soft sm:block">
         <div className="flex gap-1 overflow-x-auto">
           {tabs.map(([key, Icon, label]) => (
             <button key={key} className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-lg px-4 text-sm font-semibold ${tab === key ? 'bg-mist text-forest' : 'text-zinc-600 hover:bg-mist'}`} onClick={() => setTab(key)}>
