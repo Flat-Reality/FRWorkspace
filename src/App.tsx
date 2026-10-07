@@ -684,7 +684,7 @@ export default function App() {
   const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
   const [currentMemberId, setCurrentMemberId] = useState<string | null>(null);
   const [loginIntroName, setLoginIntroName] = useState('');
-  const [entraSetupStage, setEntraSetupStage] = useState<'welcome' | 'identity' | 'setup' | 'complete' | null>(null);
+  const [entraSetupStage, setEntraSetupStage] = useState<'welcome' | 'identity' | 'orbit' | 'setup' | 'complete' | null>(null);
   const [entraSetupMemberId, setEntraSetupMemberId] = useState<string | null>(null);
   const [entraPreferredName, setEntraPreferredName] = useState('');
   const [isCompletingEntraSetup, setIsCompletingEntraSetup] = useState(false);
@@ -761,8 +761,9 @@ export default function App() {
                 setEntraSetupMemberId(member.id);
                 setEntraPreferredName(member.preferredName);
                 setEntraSetupStage('welcome');
-                window.setTimeout(() => setEntraSetupStage('identity'), 1900);
-                window.setTimeout(() => setEntraSetupStage('setup'), 3900);
+                window.setTimeout(() => setEntraSetupStage('identity'), 5400);
+                window.setTimeout(() => setEntraSetupStage('orbit'), 7400);
+                window.setTimeout(() => setEntraSetupStage('setup'), 15400);
               } else {
                 setLoginIntroName(displayName(member));
                 window.setTimeout(() => setLoginIntroName(''), 1150);
@@ -1180,14 +1181,34 @@ export default function App() {
       {entraSetupStage && currentMember && (
         <div className={`entra-setup-overlay fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-mist px-4 py-8 ${entraSetupStage === 'complete' ? 'is-complete' : ''}`}>
           {entraSetupStage === 'welcome' && (
-            <h1 className="entra-welcome-title px-6 text-center text-4xl font-semibold md:text-6xl">Welcome back, {displayName(currentMember)}!</h1>
+            <div className="entra-welcome-sequence px-6 text-center">
+              <h1 className="entra-welcome-title entra-welcome-title-base text-4xl font-semibold md:text-6xl">Welcome back, {displayName(currentMember)}.</h1>
+              <h1 aria-hidden="true" className="entra-welcome-title entra-welcome-title-gradient text-4xl font-semibold md:text-6xl">Welcome back, {displayName(currentMember)}.</h1>
+            </div>
           )}
           {entraSetupStage === 'identity' && (
-            <div className="entra-identity-loader grid justify-items-center gap-5 text-center">
-              <span className="entra-icon-bounce flex h-28 w-28 items-center justify-center rounded-3xl bg-white shadow-soft">
-                <img className="h-20 w-20" src={ENTRA_ICON} alt="Microsoft Entra ID" />
-              </span>
-              <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[#1686c8]">Securing your identity</p>
+            <div className="entra-identity-loader grid justify-items-center">
+              <img className="entra-icon-pulse h-28 w-28" src={ENTRA_ICON} alt="Microsoft Entra ID" />
+            </div>
+          )}
+          {entraSetupStage === 'orbit' && (
+            <div className="entra-orbit-scene" aria-label="Инициализация Workspace">
+              <div className="entra-orbit-system">
+                <div className="entra-orbit-track">
+                  {[
+                    { label: 'RAIN HEART', icon: publicAsset('resources/icons/rain-heart.png'), angle: '0deg', counterAngle: '0deg' },
+                    { label: 'Partners', icon: publicAsset('resources/icons/partners.png'), angle: '90deg', counterAngle: '-90deg' },
+                    { label: 'The Nick', icon: publicAsset('resources/icons/the-nick.png'), angle: '180deg', counterAngle: '-180deg' },
+                    { label: 'Workspace', icon: BRAND_ICON, angle: '270deg', counterAngle: '-270deg' },
+                  ].map((project) => (
+                    <span key={project.label} className="entra-orbit-node" style={{ '--orbit-angle': project.angle, '--counter-angle': project.counterAngle } as CSSProperties}>
+                      <span className="entra-orbit-bubble"><img src={project.icon} alt={project.label} /></span>
+                    </span>
+                  ))}
+                </div>
+                <img className="entra-icon-pulse entra-orbit-center" src={ENTRA_ICON} alt="Microsoft Entra ID" />
+              </div>
+              <p className="entra-initializing-label">Инициализация...</p>
             </div>
           )}
           {entraSetupStage === 'setup' && (
