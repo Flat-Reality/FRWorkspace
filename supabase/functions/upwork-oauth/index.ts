@@ -480,14 +480,26 @@ Deno.serve(async (request) => {
 
   try {
     const body = await request.json();
+    const action = String(body.action ?? '');
+    if (action === 'internal_sync_all' && request.headers.get('Authorization') === `Bearer ${SERVICE_ROLE_KEY}`) {
+      const state = await loadState();
+      const warnings: string[] = [];
+      await purgeExpiredCache();
+      for (const member of state.members) {
+        try {
+          await syncMember(member, true);
+        } catch (error) {
+          warnings.push(`${displayName(member)}: ${error instanceof Error ? error.message : 'Upwork synchronization failed.'}`);
+        }
+      }
+      return json({ ok: true, warnings });
+    }
     const context = await actorFromToken(String(body.sessionToken ?? ''));
     if (!context) return json({ error: 'Session is invalid or expired.' }, 401);
     const targetMemberId = String(body.memberId ?? context.actor.id);
     if (targetMemberId !== context.actor.id && !context.actor.isAdmin) return json({ error: 'Admin access is required.' }, 403);
     const target = context.state.members.find((member) => member.id === targetMemberId);
     if (!target) return json({ error: 'Workspace member was not found.' }, 404);
-    const action = String(body.action ?? '');
-
     if (action === 'snapshot') return json({ snapshot: await snapshotFor(target, Boolean(body.force)) });
 
     if (action === 'connect') {

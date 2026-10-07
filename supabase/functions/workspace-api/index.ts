@@ -224,57 +224,15 @@ function entraComparable(member: WorkspaceMember) {
     employeeType: member.contractType || null,
     jobTitle: member.jobRole || null,
     mail: member.entraEmail,
-    mobilePhone: member.phoneNumber || null,
     streetAddress: member.addressStreet || member.addressOfResidence || null,
     city: member.addressCity || null,
     state: member.addressState || null,
     postalCode: member.addressPostalCode || null,
     country: member.addressCountry || member.citizenshipCountry || null,
-    extension: {
-      employmentId: member.employmentId,
-      fullName: member.fullName || '',
-      preferredName: member.preferredName || '',
-      workStartDate: member.workStartDate || '',
-      accountType: member.contractType || '',
-      addressOfResidence: member.addressOfResidence || '',
-      addressStreet: member.addressStreet || '',
-      addressCity: member.addressCity || '',
-      addressState: member.addressState || '',
-      addressPostalCode: member.addressPostalCode || '',
-      addressCountry: member.addressCountry || '',
-      citizenshipCountry: member.citizenshipCountry || '',
-      personalEmail: member.personalEmail || '',
-      slackTag: member.slackTag || '',
-      jobRole: member.jobRole || '',
-      phoneNumber: member.phoneNumber || '',
-      timeZone: member.timeZone || '',
-      portfolio: member.portfolio || '',
-      upworkUrl: member.upworkUrl || '',
-      estimatedHours: member.estimatedHours || '',
-      connectedProjects: member.benefitPrograms || [],
-      strikeSystem: Number(member.strikeSystem || 0),
-      languages: member.languages || '',
-      software: member.software || '',
-      seniority: member.seniority || '',
-      rate: member.rate || '',
-      partnerStatus: member.partnerStatus || '',
-      onboarding: member.onboarding || {},
-      employmentIdExpiresAt: member.employmentIdExpiresAt || '',
-      skills: member.skills || [],
-      endorsedSkills: member.endorsedSkills || [],
-      permissions: member.permissions || [],
-      permissionDetails: member.permissionDetails || [],
-      upworkRequired: Boolean(member.upworkRequired),
-      allowLegacyLogin: member.allowLegacyLogin !== false,
-      githubConnected: Boolean(member.githubConnected),
-      githubUsername: member.githubUsername || '',
-      githubUserId: member.githubUserId || '',
-      githubAvatarUrl: member.githubAvatarUrl || '',
-      githubProfileUrl: member.githubProfileUrl || '',
-      steamConnected: Boolean(member.steamConnected),
-      steamId: member.steamId || '',
-      steamProfileUrl: member.steamProfileUrl || '',
-    },
+    extensions: [
+      { id: 'com.flatreality.workspace.identity', data: { employmentId: member.employmentId, fullName: member.fullName || '', preferredName: member.preferredName || '', workStartDate: member.workStartDate || '', accountType: member.contractType || '', employmentIdExpiresAt: member.employmentIdExpiresAt || '', citizenshipCountry: member.citizenshipCountry || '', personalEmail: member.personalEmail || '', slackTag: member.slackTag || '', phoneNumber: member.phoneNumber || '', timeZone: member.timeZone || '', jobRole: member.jobRole || '', seniority: member.seniority || '' } },
+      { id: 'com.flatreality.workspace.work', data: { estimatedHours: member.estimatedHours || '', rate: member.rate || '', partnerStatus: member.partnerStatus || '', strikeSystem: Number(member.strikeSystem || 0), portfolio: member.portfolio || '', upworkUrl: member.upworkUrl || '', connectedProjects: member.benefitPrograms || [], permissions: member.permissions || [], permissionDetails: member.permissionDetails || [], upworkRequired: Boolean(member.upworkRequired), allowLegacyLogin: member.allowLegacyLogin !== false, skills: member.skills || [], endorsedSkills: member.endorsedSkills || [], languages: member.languages || '', software: member.software || '', githubConnected: Boolean(member.githubConnected), githubUsername: member.githubUsername || '', githubUserId: member.githubUserId || '', steamConnected: Boolean(member.steamConnected), steamId: member.steamId || '', onboarding: member.onboarding || {} } },
+    ],
   };
 }
 
@@ -468,11 +426,28 @@ async function syncMemberToEntra(member: WorkspaceMember) {
   if (!userId || !isAllowedEntraEmail(member.entraEmail || '')) return;
   const token = await getGraphAccessToken();
   const mapped = entraComparable(member);
-  const { extension, ...nativeFields } = mapped;
+  const { extensions, ...nativeFields } = mapped;
   const warnings: string[] = [];
   let synchronizedFields = 0;
   const patchedFields = new Map<string, unknown>();
   const userPath = `/users/${encodeURIComponent(userId)}`;
+
+  const deprecatedExtensionIds = [
+    'com.flatreality.workspace',
+    'com.flatreality.workspace.access',
+    'com.flatreality.workspace.skills',
+    'com.flatreality.workspace.integrations',
+    'com.flatreality.workspace.onboarding',
+  ];
+  for (const extensionId of deprecatedExtensionIds) {
+    try {
+      await graphRequest(`${userPath}/extensions/${encodeURIComponent(extensionId)}`, token, { method: 'DELETE' });
+    } catch (error) {
+      if (!(error instanceof Error) || !/not found|could not be found|Request_ResourceNotFound/i.test(error.message)) {
+        warnings.push(`${extensionId}: ${error instanceof Error ? error.message : 'Microsoft Graph rejected extension cleanup.'}`);
+      }
+    }
+  }
 
   for (const [field, value] of Object.entries(nativeFields)) {
     try {
@@ -498,23 +473,24 @@ async function syncMemberToEntra(member: WorkspaceMember) {
     }
   }
 
-  const extensionId = 'com.flatreality.workspace';
-  try {
-    await graphRequest(`${userPath}/extensions/${encodeURIComponent(extensionId)}`, token, { method: 'PATCH', body: JSON.stringify(extension) });
-    synchronizedFields += 1;
-  } catch (error) {
-    if (error instanceof Error && /not found|could not be found|Request_ResourceNotFound/i.test(error.message)) {
-      try {
-        await graphRequest(`${userPath}/extensions`, token, {
-          method: 'POST',
-          body: JSON.stringify({ '@odata.type': 'microsoft.graph.openTypeExtension', extensionName: extensionId, ...extension }),
-        });
-        synchronizedFields += 1;
-      } catch (createError) {
-        warnings.push(`Workspace HR extension: ${createError instanceof Error ? createError.message : 'Microsoft Graph rejected the extension.'}`);
+  for (const extension of extensions) {
+    try {
+      await graphRequest(`${userPath}/extensions/${encodeURIComponent(extension.id)}`, token, { method: 'PATCH', body: JSON.stringify(extension.data) });
+      synchronizedFields += 1;
+    } catch (error) {
+      if (error instanceof Error && /not found|could not be found|Request_ResourceNotFound/i.test(error.message)) {
+        try {
+          await graphRequest(`${userPath}/extensions`, token, {
+            method: 'POST',
+            body: JSON.stringify({ '@odata.type': 'microsoft.graph.openTypeExtension', extensionName: extension.id, ...extension.data }),
+          });
+          synchronizedFields += 1;
+        } catch (createError) {
+          warnings.push(`${extension.id}: ${createError instanceof Error ? createError.message : 'Microsoft Graph rejected the extension.'}`);
+        }
+      } else {
+        warnings.push(`${extension.id}: ${error instanceof Error ? error.message : 'Microsoft Graph rejected the extension.'}`);
       }
-    } else {
-      warnings.push(`Workspace HR extension: ${error instanceof Error ? error.message : 'Microsoft Graph rejected the extension.'}`);
     }
   }
 
@@ -538,7 +514,7 @@ async function syncChangedEntraMembers(before: WorkspaceState, after: WorkspaceS
         summary: fieldWarnings.length ? `${displayName(member)} was partially synchronized with Microsoft Entra ID.` : `${displayName(member)} was synchronized with Microsoft Entra ID.`,
         payload: {
           ...(fieldWarnings.length ? { warnings: fieldWarnings } : {}),
-          verifiedNativeFields: Object.keys(entraComparable(member)).filter((field) => field !== 'extension'),
+          verifiedNativeFields: Object.keys(entraComparable(member)).filter((field) => field !== 'extensions'),
         },
       });
     } catch (error) {
@@ -548,6 +524,31 @@ async function syncChangedEntraMembers(before: WorkspaceState, after: WorkspaceS
     }
   }
   return warnings;
+}
+
+async function syncAllEntraMembers(state: WorkspaceState) {
+  const warnings: string[] = [];
+  for (const member of state.members) {
+    if (!member.entraEmail) continue;
+    try {
+      const memberWarnings = await syncMemberToEntra(member);
+      warnings.push(...memberWarnings.map((warning) => `${displayName(member)}: ${warning}`));
+    } catch (error) {
+      warnings.push(`${displayName(member)}: ${error instanceof Error ? error.message : 'Microsoft Graph synchronization failed.'}`);
+    }
+  }
+  return warnings;
+}
+
+async function syncAllUpworkData() {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/upwork-oauth`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}`, apikey: SERVICE_ROLE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'internal_sync_all' }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return [payload.error || `Upwork synchronization returned ${response.status}.`];
+  return Array.isArray(payload.warnings) ? payload.warnings : [];
 }
 
 async function writeAuditLog({ eventType, actor, target, summary, payload = {} }: AuditEvent) {
@@ -763,6 +764,23 @@ Deno.serve(async (request) => {
     const body = await request.json();
     const action = String(body.action ?? '');
 
+    if (action === 'scheduled_sync' && request.headers.get('Authorization') === `Bearer ${SERVICE_ROLE_KEY}`) {
+      const state = await loadState();
+      const actor = state.members.find((member) => member.isAdmin) ?? state.members[0];
+      if (!actor) return json({ error: 'No Workspace administrator was found.' }, 404);
+      const profileWarnings = await syncAllEntraMembers(state);
+      const reconciled = await reconcileAccessFromEntra(state, actor);
+      const upworkWarnings = await syncAllUpworkData();
+      const warnings = [...profileWarnings, ...reconciled.warnings, ...upworkWarnings];
+      await writeAuditLog({
+        eventType: warnings.length ? 'system.scheduled_sync_partial' : 'system.scheduled_sync_completed',
+        actor,
+        summary: 'Scheduled Workspace, Entra, GitHub and Upwork synchronization completed.',
+        payload: { warnings },
+      });
+      return json({ ok: true, warnings });
+    }
+
     if (action === 'login') {
       let state = await loadState();
       const employmentId = String(body.employmentId ?? '').trim().toLowerCase();
@@ -952,7 +970,7 @@ Deno.serve(async (request) => {
         summary: warnings.length ? `${displayName(target)} was partially synchronized with Microsoft Entra ID.` : `${displayName(target)} was synchronized with Microsoft Entra ID.`,
         payload: {
           ...(warnings.length ? { warnings } : {}),
-          verifiedNativeFields: Object.keys(entraComparable(target)).filter((field) => field !== 'extension'),
+          verifiedNativeFields: Object.keys(entraComparable(target)).filter((field) => field !== 'extensions'),
         },
       });
       return json({ ok: true, warnings });

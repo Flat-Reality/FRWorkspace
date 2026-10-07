@@ -69,7 +69,7 @@ import {
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, reconcileAccessFromEntra, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin, syncEntraProfile, syncGitHubAccess } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -1943,12 +1943,6 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
     setIsGitHubBusy(true);
     try { await connectGitHub(token); } catch (error) { setGitHubMessage(error instanceof Error ? error.message : 'GitHub connection could not be started.'); setIsGitHubBusy(false); }
   }
-  async function synchronizeGitHub() {
-    const token = getStoredSession()?.token;
-    if (!token) return;
-    setIsGitHubBusy(true);
-    try { setGitHub(await syncGitHubAccess(token)); setGitHubMessage('GitHub access synchronized.'); } catch (error) { setGitHubMessage(error instanceof Error ? error.message : 'GitHub access could not be synchronized.'); } finally { setIsGitHubBusy(false); }
-  }
   async function removeGitHubConnection() {
     const token = getStoredSession()?.token;
     if (!token || !window.confirm('Disconnect GitHub from this Workspace profile?')) return;
@@ -1976,7 +1970,7 @@ function Profile({ member, avatarUrl, records, upwork, upworkStatus, refreshUpwo
     {tab === 'contact' && <div className="grid gap-5"><section className="grid gap-4 rounded-xl border border-line bg-paper p-6 shadow-soft md:grid-cols-2"><Field label="Employment ID" value={member.employmentId} disabled onChange={() => undefined} /><Field label="Full Name" value={member.fullName} disabled onChange={() => undefined} /><Field label="Preferred Name" value={member.preferredName} onChange={(value) => updateCurrentMember({ preferredName: value })} /><Field label="Entra ID Email" value={member.entraEmail} disabled onChange={() => undefined} /><Field label="Personal Email" value={member.personalEmail} disabled onChange={() => undefined} /><Field label="Phone Number" value={member.phoneNumber} onChange={(value) => updateCurrentMember({ phoneNumber: value })} /><Field label="Slack Tag" value={member.slackTag ?? ''} disabled onChange={() => undefined} /><Field label="Time Zone" value={member.timeZone} onChange={(value) => updateCurrentMember({ timeZone: value })} /><Field label="Portfolio" value={member.portfolio} onChange={(value) => updateCurrentMember({ portfolio: value })} /></section><a className="flex items-center justify-between rounded-xl border border-line bg-paper p-5 shadow-soft" href="https://join.slack.com/t/flatrealityeu/shared_invite/zt-3eeknccsz-MWbN2vlNbRNwu3blGs11kw" target="_blank" rel="noreferrer"><span><span className="block font-semibold">Need to change something else?</span><span className="mt-1 block text-sm text-zinc-500">Contact your manager via Slack.</span></span><span className="rounded-lg bg-[#4A154B] px-4 py-2 text-sm font-semibold text-white">Open Slack</span></a></div>}
     {tab === 'payments' && <div className="grid gap-5"><section className="flex items-center justify-between rounded-xl border border-line bg-paper p-6 shadow-soft"><div><p className="text-sm font-semibold text-zinc-500">Withheld Balance</p><p className="mt-2 text-sm text-zinc-500">Workspace reconciliation balance</p></div><strong className="text-4xl">{formatEuroAmount(member.withheldBalance)}</strong></section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">SupplierForm</h2><p className="mt-2 text-zinc-600">Update your payout and supplier information securely.</p><a className="mt-5 inline-flex h-11 items-center rounded-lg bg-ink px-4 text-sm font-semibold text-white" href={isUpworkContract(member) ? 'https://www.upwork.com/nx/payments/disbursement-methods' : 'https://forms.office.com/r/maSdSX94Ui'} target="_blank" rel="noreferrer">{isUpworkContract(member) ? 'Open Upwork Payments' : 'Open Supplier Form'}</a></section></div>}
     {tab === 'skills' && <SkillsPanel member={member} editable updateMember={updateCurrentMember} />}
-    {tab === 'integrations' && <div className="grid gap-4"><section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><img className="h-11 w-11" src={ENTRA_ICON} alt="" /><div><h2 className="font-semibold">Microsoft Entra ID</h2><p className="mt-1 text-sm text-zinc-500">{member.entraEmail || 'Not connected'}</p></div></div>{member.entraEmail && <a className="rounded-lg bg-[#1686c8] px-4 py-2 text-sm font-semibold text-white" href="https://mysignins.microsoft.com/security-info" target="_blank" rel="noreferrer">SSO Settings</a>}</section>{(isIndependentPartner(member) || partner) && <section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div><h2 className="font-semibold">Upwork</h2><p className="mt-1 text-sm text-zinc-500">{upworkStatus || upwork.message || 'Synchronize partner contracts and payments.'}</p></div>{upwork.connected ? <div className="flex gap-2"><button className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" onClick={refreshUpwork}>Sync</button><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button></div> : <button className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" disabled={isUpworkBusy} onClick={() => void beginUpworkConnection()}><img className="h-5 w-auto brightness-0 invert" src={publicAsset('resources/logos/upworklogo.webp')} alt="" />Connect Upwork</button>}</section>}<section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex min-w-0 items-center gap-4">{github.avatarUrl ? <img className="h-11 w-11 rounded-full object-cover" src={github.avatarUrl} alt="" /> : <Github size={38} />}<div className="min-w-0"><h2 className="font-semibold">GitHub</h2><p className="mt-1 truncate text-sm text-zinc-500">{github.connected ? `@${github.username} · ${github.membershipState === 'active' ? 'Organization access active' : github.membershipState === 'pending' ? 'Organization invitation pending' : 'Access needs attention'}` : 'Connect your developer identity and project repositories.'}</p>{(githubMessage || github.syncError) && <p className="mt-1 text-sm text-amber-700">{githubMessage || github.syncError}</p>}</div></div>{github.connected ? <div className="flex shrink-0 flex-wrap gap-2"><a className="rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" href={github.profileUrl} target="_blank" rel="noreferrer">Open GitHub</a><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isGitHubBusy} onClick={() => void synchronizeGitHub()}>Sync Access</button><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" disabled={isGitHubBusy} onClick={() => void removeGitHubConnection()}>Disconnect</button></div> : <button className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" disabled={isGitHubBusy} onClick={() => void beginGitHubConnection()}><Github size={18} />Connect GitHub</button>}</section></div>}
+    {tab === 'integrations' && <div className="grid gap-4"><section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex items-center gap-4"><img className="h-11 w-11" src={ENTRA_ICON} alt="" /><div><h2 className="font-semibold">Microsoft Entra ID</h2><p className="mt-1 text-sm text-zinc-500">{member.entraEmail || 'Not connected'}</p></div></div>{member.entraEmail && <a className="rounded-lg bg-[#1686c8] px-4 py-2 text-sm font-semibold text-white" href="https://mysignins.microsoft.com/security-info" target="_blank" rel="noreferrer">SSO Settings</a>}</section>{(isIndependentPartner(member) || partner) && <section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div><h2 className="font-semibold">Upwork</h2><p className="mt-1 text-sm text-zinc-500">{upworkStatus || upwork.message || 'Synchronize partner contracts and payments.'}</p></div>{upwork.connected ? <button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button> : <button className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" disabled={isUpworkBusy} onClick={() => void beginUpworkConnection()}><img className="h-5 w-auto brightness-0 invert" src={publicAsset('resources/logos/upworklogo.webp')} alt="" />Connect Upwork</button>}</section>}<section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex min-w-0 items-center gap-4">{github.avatarUrl ? <img className="h-11 w-11 rounded-full object-cover" src={github.avatarUrl} alt="" /> : <Github size={38} />}<div className="min-w-0"><h2 className="font-semibold">GitHub</h2><p className="mt-1 truncate text-sm text-zinc-500">{github.connected ? `@${github.username} · ${github.membershipState === 'active' ? 'Organization access active' : github.membershipState === 'pending' ? 'Organization invitation pending' : 'Access needs attention'}` : 'Connect your developer identity and project repositories.'}</p>{(githubMessage || github.syncError) && <p className="mt-1 text-sm text-amber-700">{githubMessage || github.syncError}</p>}</div></div>{github.connected ? <div className="flex shrink-0 flex-wrap gap-2"><a className="rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" href={github.profileUrl} target="_blank" rel="noreferrer">Open GitHub</a><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" disabled={isGitHubBusy} onClick={() => void removeGitHubConnection()}>Disconnect</button></div> : <button className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-[#24292f] px-4 py-2 text-sm font-semibold text-white" disabled={isGitHubBusy} onClick={() => void beginGitHubConnection()}><Github size={18} />Connect GitHub</button>}</section></div>}
     {tab === 'integrations' && <div className="grid gap-4"><div className="flex items-center gap-3 pt-2"><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-forest/10 text-forest"><Gift size={21} /></span><div><h2 className="text-xl font-semibold">Autogrant Packages</h2><p className="text-sm text-zinc-500">Link your Steam identity for project packages and developer access.</p></div></div><section className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-paper p-5 shadow-soft sm:flex-row sm:items-center"><div className="flex min-w-0 items-center gap-4"><span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-black"><img className="h-full w-full object-contain" src={publicAsset('resources/logos/steam.jpg')} alt="" /></span><div className="min-w-0"><h3 className="font-semibold">Steamworks</h3><p className="mt-1 text-sm text-zinc-500">{steam.connected ? (steam.packageStatus === 'ready' ? 'Autogrant packages ready.' : 'Connected · Ready for Steamworks group assignment.') : 'Connect Steam to prepare automatic project package access.'}</p>{steamMessage && <p className={`mt-1 text-sm ${steamMessage.includes('connected') ? 'text-emerald-700' : 'text-amber-700'}`}>{steamMessage}</p>}</div></div>{steam.connected ? <div className="flex shrink-0 flex-wrap gap-2"><a className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white" href={steam.profileUrl} target="_blank" rel="noreferrer">Open Steam</a><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" disabled={isSteamBusy} onClick={() => void removeSteamConnection()}>Disconnect</button></div> : <button className="inline-flex h-11 shrink-0 items-center justify-center gap-3 rounded-lg bg-black px-5 text-sm font-semibold text-white disabled:opacity-60" disabled={isSteamBusy} onClick={() => void beginSteamConnection()}><img className="h-6 w-6 object-contain" src={publicAsset('resources/logos/steamworks.png')} alt="" />{isSteamBusy ? 'Connecting...' : 'Connect Steamworks'}</button>}</section></div>}
     <div className="flex flex-wrap gap-3 lg:hidden"><button className="rounded-lg border border-line px-4 py-2 text-sm font-semibold" onClick={() => setView('dashboard')}>Home</button><button className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600" onClick={onLogout}>Log Out</button></div>
   </div>;
@@ -2066,10 +2060,7 @@ function LegacyProfile({ member, avatarUrl, records, upwork, upworkStatus, refre
                 {isUpworkBusy ? 'Connecting...' : 'Connect Upwork'}
               </button>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-black px-4 text-sm font-semibold text-white" onClick={refreshUpwork}><RefreshCw size={16} /> Sync</button>
-                <button className="h-10 rounded-lg border border-line bg-paper px-4 text-sm font-medium text-zinc-600" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button>
-              </div>
+              <button className="h-10 rounded-lg border border-line bg-paper px-4 text-sm font-medium text-zinc-600" disabled={isUpworkBusy} onClick={() => void removeUpworkConnection()}>Disconnect</button>
             )}
           </div>
           {upwork.connected && upwork.profile && (
@@ -3357,7 +3348,6 @@ function HrAdmin({
   const [tab, setTab] = useState<HrTab>('overview');
   const [search, setSearch] = useState('');
   const [showSuspendedUsers, setShowSuspendedUsers] = useState(false);
-  const [accessSyncStatus, setAccessSyncStatus] = useState('');
   const [isOnboarding, setIsOnboarding] = useState(() => window.location.hash === '#/hr/onboarding');
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? null;
   const filteredMembers = members.filter((member) => [member.fullName, member.preferredName, member.employmentId, member.jobRole].join(' ').toLowerCase().includes(search.toLowerCase()));
@@ -3383,19 +3373,6 @@ function HrAdmin({
     setMembers((items) => items.map((member) => (member.id === selectedMember.id ? { ...member, ...changes } : member)));
   }
 
-  async function reconcileAccess() {
-    const token = getStoredSession()?.token;
-    if (!token) return;
-    setAccessSyncStatus('Reading the canonical Entra group matrix...');
-    try {
-      const result = await reconcileAccessFromEntra(token);
-      setMembers(result.state.members);
-      setAccessSyncStatus(result.warnings.length ? `Access synchronized with ${result.warnings.length} warning(s).` : 'Entra Groups, Workspace and GitHub Teams are synchronized.');
-    } catch (error) {
-      setAccessSyncStatus(error instanceof Error ? error.message : 'Access synchronization failed.');
-    }
-  }
-
   return (
     <div className={`hr-admin-page grid gap-4 sm:gap-6 ${isOnboarding ? 'min-h-screen' : selectedMember ? 'p-3 sm:p-4 lg:p-6' : ''}`}>
       {isOnboarding ? (
@@ -3415,9 +3392,8 @@ function HrAdmin({
                 <p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">HR</p>
                 <h1 className="mt-3 text-3xl font-semibold">People</h1>
               </div>
-              <div className="flex flex-wrap gap-2"><button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 text-sm font-medium" onClick={() => void reconcileAccess()}><RefreshCw size={17} />Sync Access</button><button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-medium text-white" onClick={() => { window.location.hash = '/hr/onboarding'; setIsOnboarding(true); }}><Plus size={17} />Add User</button></div>
+              <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 text-sm font-medium text-white" onClick={() => { window.location.hash = '/hr/onboarding'; setIsOnboarding(true); }}><Plus size={17} />Add User</button>
             </div>
-            {accessSyncStatus && <p className="mt-4 rounded-lg border border-line bg-mist px-3 py-2 text-sm text-zinc-600">{accessSyncStatus}</p>}
             <label className="mt-5 flex h-11 items-center gap-3 rounded-lg border border-line px-3">
               <Search size={18} className="text-zinc-400" />
               <input className="w-full outline-none" placeholder="Search users" value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -3570,7 +3546,7 @@ function MemberEditor({
       {tab === 'levelup' && <AdminMemberLevelUpTab member={member} levels={levels} rewards={rewards} updateMember={updateMember} />}
       {tab === 'payments' && <AdminPaymentsTab member={member} upwork={memberUpwork} updateMember={updateMember} />}
       {tab === 'documents' && <AdminDocumentsTab member={member} updateMember={updateMember} onStartUpworkContract={() => setShowContractWizard(true)} />}
-      {tab === 'partners' && <AdminMemberPartnersTab member={member} upwork={memberUpwork} message={upworkMessage} refresh={() => void refreshMemberUpwork(true)} />}
+      {tab === 'partners' && <AdminMemberPartnersTab member={member} upwork={memberUpwork} message={upworkMessage} />}
       {tab === 'careerGrowth' && <Placeholder title="Career Growth" text="Career planning, goals and development reviews will appear here." />}
       {tab === 'experiments' && <AdminScheduleTab member={member} updateMember={updateMember} />}
       {showContractWizard && <UpworkContractWizard member={member} onClose={() => setShowContractWizard(false)} onCreated={(snapshot) => { setMemberUpwork(snapshot); setShowContractWizard(false); }} />}
@@ -3646,29 +3622,13 @@ const accessRoleOptions: Array<[string, string]> = [
 ];
 
 function AdminAccessRoleTab({ member, updateMember, setMembers, impersonateMember, resetMemberPassword }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; impersonateMember: (memberId: string) => void | Promise<void>; resetMemberPassword: (memberId: string) => void | Promise<void> }) {
-  const [syncStatus, setSyncStatus] = useState('');
   function toggleProject(project: BenefitProgram) { updateMember({ benefitPrograms: member.benefitPrograms.includes(project) ? member.benefitPrograms.filter((item) => item !== project) : [...member.benefitPrograms, project] }); }
   function toggleRole(role: string) { const permissions = member.permissions ?? []; const next = permissions.includes(role) ? permissions.filter((item) => item !== role) : [...permissions, role]; updateMember({ permissions: next, isAdmin: next.includes('Admin') }); }
-  async function syncEntra() { const token = getStoredSession()?.token; if (!token) return; setSyncStatus('Synchronizing...'); try { const warnings = await syncEntraProfile(token, member.id); setSyncStatus(warnings.length ? `Synchronized with ${warnings.length} warning(s).` : 'Entra ID synchronized.'); } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Synchronization failed.'); } }
   function erase(label: string) { if (window.confirm(`${label} ${displayName(member)}? This currently removes the Workspace profile.`)) setMembers((items) => items.filter((item) => item.id !== member.id)); }
-  return <div className="grid gap-5"><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Assigned Projects</h2><div className="mt-4 grid gap-3 sm:grid-cols-3">{benefitProgramOptions.map((project) => <button key={project} className={`rounded-lg border p-4 text-left font-semibold ${member.benefitPrograms.includes(project) ? 'border-forest bg-forest/5 text-forest' : 'border-line bg-mist'}`} onClick={() => toggleProject(project)}>{projectLabel(project)}</button>)}</div></section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">General Access</h2><div className="mt-4 grid gap-3 md:grid-cols-2">{accessRoleOptions.map(([role, description]) => <label key={role} className="flex cursor-pointer gap-3 rounded-lg border border-line p-4"><input className="mt-1 accent-[#7F00FF]" type="checkbox" checked={(member.permissions ?? []).includes(role)} onChange={() => toggleRole(role)} /><span><span className="block font-semibold">{role}</span><span className="mt-1 block text-sm text-zinc-500">{description}</span></span></label>)}</div><div className="mt-5 grid gap-4 md:grid-cols-2"><Field label="Job Role" value={member.jobRole} onChange={(value) => updateMember({ jobRole: value })} /><Field label="Seniority" value={member.seniority} onChange={(value) => updateMember({ seniority: value })} /></div></section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Status</h2><p className="mt-1 text-sm text-zinc-500">Control availability and temporary account states.</p><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">{statusOptions.map((option) => { const Icon = option.icon; const selected = member.status === option.value; return <button key={option.value} className={`flex min-h-20 items-center gap-3 rounded-xl border p-3 text-left text-sm font-medium transition ${selected ? 'border-forest bg-forest text-white' : 'border-line bg-mist text-zinc-600 hover:border-forest/40'}`} onClick={() => updateMember({ status: option.value, statusUntil: option.needsDate ? member.statusUntil : '' })}><Icon size={19} /><span>{option.label}</span></button>; })}</div>{statusOptions.find((option) => option.value === member.status)?.needsDate && <div className="mt-4 max-w-sm"><Field label={`${statusLabel(member.status)} end date`} type="date" value={member.statusUntil} onChange={(value) => updateMember({ statusUntil: value })} /></div>}</section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Control Panel</h2><div className="mt-4 flex flex-wrap gap-3">{member.entraEmail && <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#1686c8] px-4 text-sm font-semibold text-white" onClick={() => void syncEntra()}><RefreshCw size={16} />Sync Entra</button>}<button className="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-semibold text-white" onClick={() => void impersonateMember(member.id)}><KeyRound size={16} />Sign as this user</button><button className="h-10 rounded-lg border border-line px-4 text-sm font-semibold" onClick={() => void resetMemberPassword(member.id)}>Reset Password</button><button className="h-10 rounded-lg border border-red-300 px-4 text-sm font-semibold text-red-600" onClick={() => erase('Erase')}>Erase User</button><button className="h-10 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white" onClick={() => erase('Fire')}>Fire User</button></div>{syncStatus && <p className="mt-3 text-sm text-zinc-500">{syncStatus}</p>}</section></div>;
+  return <div className="grid gap-5"><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Assigned Projects</h2><div className="mt-4 grid gap-3 sm:grid-cols-3">{benefitProgramOptions.map((project) => <button key={project} className={`rounded-lg border p-4 text-left font-semibold ${member.benefitPrograms.includes(project) ? 'border-forest bg-forest/5 text-forest' : 'border-line bg-mist'}`} onClick={() => toggleProject(project)}>{projectLabel(project)}</button>)}</div></section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">General Access</h2><div className="mt-4 grid gap-3 md:grid-cols-2">{accessRoleOptions.map(([role, description]) => <label key={role} className="flex cursor-pointer gap-3 rounded-lg border border-line p-4"><input className="mt-1 accent-[#7F00FF]" type="checkbox" checked={(member.permissions ?? []).includes(role)} onChange={() => toggleRole(role)} /><span><span className="block font-semibold">{role}</span><span className="mt-1 block text-sm text-zinc-500">{description}</span></span></label>)}</div><div className="mt-5 grid gap-4 md:grid-cols-2"><Field label="Job Role" value={member.jobRole} onChange={(value) => updateMember({ jobRole: value })} /><Field label="Seniority" value={member.seniority} onChange={(value) => updateMember({ seniority: value })} /></div></section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Status</h2><p className="mt-1 text-sm text-zinc-500">Control availability and temporary account states.</p><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">{statusOptions.map((option) => { const Icon = option.icon; const selected = member.status === option.value; return <button key={option.value} className={`flex min-h-20 items-center gap-3 rounded-xl border p-3 text-left text-sm font-medium transition ${selected ? 'border-forest bg-forest text-white' : 'border-line bg-mist text-zinc-600 hover:border-forest/40'}`} onClick={() => updateMember({ status: option.value, statusUntil: option.needsDate ? member.statusUntil : '' })}><Icon size={19} /><span>{option.label}</span></button>; })}</div>{statusOptions.find((option) => option.value === member.status)?.needsDate && <div className="mt-4 max-w-sm"><Field label={`${statusLabel(member.status)} end date`} type="date" value={member.statusUntil} onChange={(value) => updateMember({ statusUntil: value })} /></div>}</section><section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Control Panel</h2><div className="mt-4 flex flex-wrap gap-3"><button className="inline-flex h-10 items-center gap-2 rounded-lg bg-ink px-4 text-sm font-semibold text-white" onClick={() => void impersonateMember(member.id)}><KeyRound size={16} />Sign as this user</button><button className="h-10 rounded-lg border border-line px-4 text-sm font-semibold" onClick={() => void resetMemberPassword(member.id)}>Reset Password</button><button className="h-10 rounded-lg border border-red-300 px-4 text-sm font-semibold text-red-600" onClick={() => erase('Erase')}>Erase User</button><button className="h-10 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white" onClick={() => erase('Fire')}>Fire User</button></div></section></div>;
 }
 
 function AdminProfileTab({ member, updateMember, setMembers, impersonateMember, resetMemberPassword }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void; setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>; impersonateMember: (memberId: string) => void | Promise<void>; resetMemberPassword: (memberId: string) => void | Promise<void> }) {
-  const [entraSyncStatus, setEntraSyncStatus] = useState('');
-
-  async function synchronizeEntraProfile() {
-    const token = getStoredSession()?.token;
-    if (!token) return;
-    setEntraSyncStatus('Synchronizing...');
-    try {
-      const warnings = await syncEntraProfile(token, member.id);
-      setEntraSyncStatus(warnings.length ? `Synchronized with ${warnings.length} restricted field${warnings.length === 1 ? '' : 's'}. Details are available in Logs.` : 'Entra ID profile synchronized.');
-    } catch (error) {
-      setEntraSyncStatus(error instanceof Error ? error.message : 'Entra ID synchronization failed.');
-    }
-  }
-
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <Section title="Profile">
@@ -3720,12 +3680,6 @@ function AdminProfileTab({ member, updateMember, setMembers, impersonateMember, 
       </Section>
       <Section title="Debug">
         <div className="flex flex-wrap gap-3">
-          {member.entraEmail && (
-            <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#1686c8] px-3 text-sm font-medium text-white" onClick={() => void synchronizeEntraProfile()}>
-              <RefreshCw size={16} />
-              Sync Entra ID
-            </button>
-          )}
           <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-medium text-zinc-700" onClick={() => void resetMemberPassword(member.id)}>
             <RotateCcw size={16} />
             Reset Password
@@ -3735,7 +3689,6 @@ function AdminProfileTab({ member, updateMember, setMembers, impersonateMember, 
             Sign In As This User
           </button>
         </div>
-        {entraSyncStatus && <p className="text-sm text-zinc-600">{entraSyncStatus}</p>}
       </Section>
       <button className="justify-self-start rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600" onClick={() => setMembers((items) => items.filter((item) => item.id !== member.id))}>
         Delete User
@@ -3892,17 +3845,16 @@ function AdminMemberLevelUpTab({ member, levels, rewards, updateMember }: { memb
   );
 }
 
-function AdminMemberPartnersTab({ member, upwork, message, refresh }: { member: WorkspaceMember; upwork: UpworkSnapshot; message: string; refresh: () => void }) {
+function AdminMemberPartnersTab({ member, upwork, message }: { member: WorkspaceMember; upwork: UpworkSnapshot; message: string }) {
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
       <Section title="Partners™">
-        <div className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-mist p-4 sm:flex-row sm:items-center">
+        <div className="rounded-xl border border-line bg-mist p-4">
           <div>
             <p className="font-semibold">Upwork Connection</p>
             <p className="mt-1 text-sm text-zinc-600">{message || upwork.message}</p>
             {upwork.lastSyncedAt && <p className="mt-2 text-xs text-zinc-500">Last synchronized: {formatDateTime(upwork.lastSyncedAt)}</p>}
           </div>
-          <button className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-black px-4 text-sm font-semibold text-white disabled:opacity-50" disabled={!upwork.connected} onClick={refresh}><RefreshCw size={16} /> Sync now</button>
         </div>
         {upwork.profile && (
           <div className="grid gap-3 sm:grid-cols-3">
