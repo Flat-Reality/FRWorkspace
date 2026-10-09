@@ -101,8 +101,8 @@ import type {
   WorkspaceState,
 } from './types';
 
-type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'retainer' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files';
-type AdminModule = 'home' | 'hr' | 'partners' | 'guides' | 'levelup' | 'logs' | 'supabase';
+type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files';
+type AdminModule = 'home' | 'hr' | 'partners' | 'retainer' | 'guides' | 'levelup' | 'logs' | 'supabase';
 type HrTab = 'overview' | 'contact' | 'records' | 'access' | 'devices' | 'levelup' | 'payments' | 'documents' | 'careerGrowth' | 'partners' | 'experiments';
 type ProfileTab = 'profile' | 'contact' | 'payments' | 'skills' | 'integrations';
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
@@ -897,7 +897,6 @@ export default function App() {
         ];
 
   if (currentMember?.isAdmin && currentMember.status !== 'suspended') navItems.push(['admin', UsersRound, 'Admin']);
-  if ((currentMember?.isAdmin || currentMember?.permissions?.includes('Operations')) && currentMember.status !== 'suspended') navItems.push(['retainer', BriefcaseBusiness, 'Retainer+']);
 
   const mobileNavItems = [...navItems];
   const mobileAdminIndex = mobileNavItems.findIndex(([key]) => key === 'admin');
@@ -1367,7 +1366,6 @@ export default function App() {
               onFocusModeChange={setAdminFocusMode}
             />
           )}
-          {view === 'retainer' && (currentMember.isAdmin || currentMember.permissions?.includes('Operations')) && <RetainerAdmin />}
         </div>
       </div>
       <nav className="mobile-tabbar fixed inset-x-0 bottom-0 z-40 grid grid-flow-col auto-cols-fr gap-1 rounded-t-[24px] border-x-0 border-b-0 border-t border-line bg-paper/95 px-2 pt-2 shadow-soft backdrop-blur lg:hidden">
@@ -3317,6 +3315,7 @@ function Admin({
 
   if (module === 'hr') return <HrAdmin members={members} rewards={rewards} levels={levels} workRecords={workRecords} setMembers={setMembers} setWorkRecords={setWorkRecords} updateWorkspace={updateWorkspace} impersonateMember={impersonateMember} resetMemberPassword={resetMemberPassword} onFocusModeChange={onFocusModeChange} onBack={() => { window.location.hash = ''; setModule('home'); }} />;
   if (module === 'partners') return <AdminPartners members={members} workRecords={workRecords} setMembers={setMembers} onBack={() => setModule('home')} />;
+  if (module === 'retainer') return <div className="grid gap-4"><BackButton onBack={() => setModule('home')} /><RetainerAdmin /></div>;
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
   if (module === 'logs') return <AdminLogs members={members} onBack={() => setModule('home')} />;
@@ -3324,6 +3323,7 @@ function Admin({
   const modules: Array<[AdminModule, LucideIcon, string, string]> = [
     ['hr', UsersRound, 'HR', 'Users, contracts, documents, payments, statuses and work records.'],
     ['partners', Building2, 'Partners™', 'Manage partner availability, rates, index and profiles.'],
+    ['retainer', BriefcaseBusiness, 'Retainer+', 'Edit the public catalogue, availability rules, inquiries and partner assignments.'],
     ['guides', BookOpen, 'Guide Writting', 'Create and edit workspace guide pages.'],
     ['levelup', Trophy, 'LevelUp! Configurator', 'Configure levels, XP requirements and rewards.'],
     ['logs', FileText, 'Logs', 'Review sessions, profile changes and workspace data edits.'],
