@@ -865,6 +865,15 @@ Deno.serve(async (request) => {
     const body = await request.json();
     const action = String(body.action ?? '');
 
+    if (action === 'scheduled_retainer_sync' && request.headers.get('Authorization') === `Bearer ${SERVICE_ROLE_KEY}`) {
+      const state = await loadState();
+      const actor = state.members.find((member) => member.isAdmin) ?? state.members[0];
+      if (!actor) return json({ error: 'No Workspace administrator was found.' }, 404);
+      await publishRetainerCatalogue(state);
+      await writeAuditLog({ eventType: 'system.retainer_sync_completed', actor, summary: 'Scheduled Retainer Plus catalogue synchronization completed.' });
+      return json({ ok: true });
+    }
+
     if (action === 'scheduled_sync' && request.headers.get('Authorization') === `Bearer ${SERVICE_ROLE_KEY}`) {
       const state = await loadState();
       const actor = state.members.find((member) => member.isAdmin) ?? state.members[0];
