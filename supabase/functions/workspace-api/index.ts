@@ -67,6 +67,7 @@ type WorkspaceMember = {
   steamConnected?: boolean;
   steamId?: string;
   steamProfileUrl?: string;
+  status?: string;
 };
 
 type WorkspaceState = {
@@ -756,6 +757,106 @@ function mergeUserState(previous: WorkspaceState, requested: WorkspaceState, act
   };
 }
 
+const RETAINER_BRIDGE_URL = 'https://yuballunxclgwdaqtbnz.supabase.co/functions/v1/retainer-workspace-bridge';
+const retainerStatuses = new Set(['new', 'reviewing', 'contacted', 'proposal', 'won', 'lost', 'spam']);
+
+function canManageRetainers(member: WorkspaceMember) {
+  return Boolean(member.isAdmin || member.permissions?.includes('Operations'));
+}
+
+async function getRetainerBridgeToken() {
+  const { data, error } = await supabase.rpc('get_retainer_workspace_bridge_token');
+  if (error || !data) throw new Error('Retainer Plus bridge is not configured.');
+  return String(data);
+}
+
+async function callRetainerBridge<T>(body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(RETAINER_BRIDGE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-retainer-bridge-token': await getRetainerBridgeToken() },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.error || 'Retainer Plus bridge request failed.');
+  return payload as T;
+}
+
+function rowToOffering(row: Record<string, unknown>) {
+  return {
+    id: String(row.id ?? ''), type: String(row.type ?? 'specialist'), category: String(row.category ?? ''), title: String(row.title ?? ''),
+    description: String(row.description ?? ''), tags: Array.isArray(row.tags) ? row.tags : [], roles: Array.isArray(row.roles) ? row.roles : [],
+    published: Boolean(row.published), staffingRules: row.staffing_rules ?? {}, internalRateEur: row.internal_rate_eur === null ? null : Number(row.internal_rate_eur),
+    availability: String(row.availability ?? 'unknown'), reasonCode: String(row.reason_code ?? ''), checkedAt: String(row.checked_at ?? ''), updatedAt: String(row.updated_at ?? ''),
+  };
+}
+
+function inquiryFromBridge(row: Record<string, unknown>) {
+  return {
+    id: String(row.id ?? ''), reference: String(row.reference ?? ''), createdAt: String(row.created_at ?? ''), updatedAt: String(row.updated_at ?? ''),
+    name: String(row.name ?? ''), organization: String(row.organization ?? ''), email: String(row.email ?? ''), projectUrl: String(row.project_url ?? ''),
+    projectDescription: String(row.project_description ?? ''), selectedServices: Array.isArray(row.selected_services) ? row.selected_services : [],
+    budgetRange: String(row.budget_range ?? ''), timeline: String(row.timeline ?? ''), status: String(row.status ?? 'new'),
+    privacyAcknowledged: Boolean(row.privacy_acknowledged), privacyNoticeVersion: String(row.privacy_notice_version ?? ''), marketingConsent: Boolean(row.marketing_consent),
+    configuration: row.retainer_configuration ?? {}, assigneeIds: Array.isArray(row.workspace_assignee_ids) ? row.workspace_assignee_ids : [],
+  };
+}
+
+function availabilityForOffering(offering: Record<string, unknown>, state: WorkspaceState) {
+  const rules = (offering.staffing_rules && typeof offering.staffing_rules === 'object' ? offering.staffing_rules : {}) as Record<string, unknown>;
+  const requiredSkills = Array.isArray(rules.requiredSkills) ? rules.requiredSkills.map((item) => String(item).toLowerCase()) : [];
+  const requiredRoles = Array.isArray(rules.requiredRoles) ? rules.requiredRoles.map((item) => String(item).toLowerCase()) : [];
+  const candidates = state.members.filter((member) => member.benefitPrograms?.includes('FR Partners') && member.status !== 'suspended' && member.partnerStatus === 'available');
+  const searchable = (member: WorkspaceMember) => [member.jobRole, member.seniority, member.software, member.languages, ...(member.skills ?? []), ...(member.endorsedSkills ?? [])].join(' ').toLowerCase();
+  const matchesSkills = (member: WorkspaceMember) => requiredSkills.every((skill) => searchable(member).includes(skill));
+  const type = String(offering.type ?? 'specialist');
+  if (type === 'capacity') {
+    return rules.confirmedReservableCapacity === true && candidates.some(matchesSkills)
+      ? { availability: 'available', reason_code: 'confirmed_capacity' }
+      : { availability: 'unavailable', reason_code: 'capacity_not_confirmed' };
+  }
+  if (type === 'team') {
+    const roles = requiredRoles.length ? requiredRoles : (Array.isArray(offering.roles) ? offering.roles.map((item) => String(item).toLowerCase()) : []);
+    if (!roles.length) return { availability: 'unknown', reason_code: 'staffing_rules_required' };
+    const used = new Set<string>();
+    const complete = roles.every((role) => {
+      const candidate = candidates.find((member) => !used.has(member.id) && matchesSkills(member) && searchable(member).includes(role));
+      if (candidate) used.add(candidate.id);
+      return Boolean(candidate);
+    });
+    return complete ? { availability: 'available', reason_code: 'team_feasible' } : { availability: 'unavailable', reason_code: 'team_not_feasible' };
+  }
+  if (!requiredSkills.length && !requiredRoles.length) return { availability: 'unknown', reason_code: 'staffing_rules_required' };
+  const match = candidates.some((member) => matchesSkills(member) && requiredRoles.every((role) => searchable(member).includes(role)));
+  return match ? { availability: 'available', reason_code: 'specialist_assignable' } : { availability: 'unavailable', reason_code: 'specialist_unavailable' };
+}
+
+async function publishRetainerCatalogue(state: WorkspaceState) {
+  const { data, error } = await supabase.from('workspace_retainer_catalogue').select('*').order('category').order('title');
+  if (error) throw error;
+  const now = new Date().toISOString();
+  const rows = (data ?? []).map((row) => ({ ...row, ...availabilityForOffering(row, state), checked_at: now }));
+  if (rows.length) {
+    const { error: updateError } = await supabase.from('workspace_retainer_catalogue').upsert(rows, { onConflict: 'id' });
+    if (updateError) throw updateError;
+    await callRetainerBridge({ action: 'publish_catalogue', offerings: rows.map((row) => ({
+      id: row.id, type: row.type, category: row.category, title: row.title, description: row.description, tags: row.tags, roles: row.roles,
+      published: row.published, availability: row.availability, checkedAt: row.checked_at, reasonCode: row.reason_code,
+    })) });
+  }
+  return rows;
+}
+
+async function retainerSnapshot(state: WorkspaceState) {
+  const { data, error } = await supabase.from('workspace_retainer_catalogue').select('*').order('category').order('title');
+  if (error) throw error;
+  const bridge = await callRetainerBridge<{ inquiries?: Record<string, unknown>[] }>({ action: 'snapshot' });
+  return {
+    offerings: (data ?? []).map(rowToOffering),
+    inquiries: (bridge.inquiries ?? []).map(inquiryFromBridge),
+    partners: state.members.filter((member) => member.benefitPrograms?.includes('FR Partners')).map((member) => ({ id: member.id, name: displayName(member), jobRole: member.jobRole ?? '', seniority: member.seniority ?? '', partnerStatus: member.partnerStatus ?? 'inactive' })),
+  };
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
@@ -768,10 +869,12 @@ Deno.serve(async (request) => {
       const state = await loadState();
       const actor = state.members.find((member) => member.isAdmin) ?? state.members[0];
       if (!actor) return json({ error: 'No Workspace administrator was found.' }, 404);
+      const retainerWarnings: string[] = [];
+      await publishRetainerCatalogue(state).catch((error) => retainerWarnings.push(error instanceof Error ? error.message : 'Retainer Plus catalogue synchronization failed.'));
       const profileWarnings = await syncAllEntraMembers(state);
       const reconciled = await reconcileAccessFromEntra(state, actor);
       const upworkWarnings = await syncAllUpworkData();
-      const warnings = [...profileWarnings, ...reconciled.warnings, ...upworkWarnings];
+      const warnings = [...profileWarnings, ...reconciled.warnings, ...upworkWarnings, ...retainerWarnings];
       await writeAuditLog({
         eventType: warnings.length ? 'system.scheduled_sync_partial' : 'system.scheduled_sync_completed',
         actor,
@@ -906,6 +1009,52 @@ Deno.serve(async (request) => {
 
     const context = await actorFromToken(String(body.sessionToken ?? ''));
     if (!context) return json({ error: 'Session is invalid or expired.' }, 401);
+
+    if (action === 'retainer_snapshot') {
+      if (!canManageRetainers(context.actor)) return json({ error: 'Admin or Operations access is required.' }, 403);
+      return json(await retainerSnapshot(context.state));
+    }
+
+    if (action === 'retainer_save_offering') {
+      if (!canManageRetainers(context.actor)) return json({ error: 'Admin or Operations access is required.' }, 403);
+      const offering = body.offering as Record<string, unknown>;
+      const id = String(offering?.id ?? '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 100);
+      const type = String(offering?.type ?? '');
+      if (!id || !['specialist', 'team', 'capacity'].includes(type)) return json({ error: 'A valid offering ID and type are required.' }, 400);
+      const row = {
+        id, type, category: String(offering.category ?? '').trim().slice(0, 120), title: String(offering.title ?? '').trim().slice(0, 160),
+        description: String(offering.description ?? '').trim().slice(0, 2000),
+        tags: Array.isArray(offering.tags) ? offering.tags.map(String).slice(0, 30) : [], roles: Array.isArray(offering.roles) ? offering.roles.map(String).slice(0, 30) : [],
+        published: Boolean(offering.published), staffing_rules: offering.staffingRules && typeof offering.staffingRules === 'object' ? offering.staffingRules : {},
+        internal_rate_eur: offering.internalRateEur === null || offering.internalRateEur === '' ? null : Number(offering.internalRateEur),
+        updated_by: context.actor.id, updated_at: new Date().toISOString(),
+      };
+      if (!row.category || !row.title) return json({ error: 'Category and title are required.' }, 400);
+      const { error } = await supabase.from('workspace_retainer_catalogue').upsert(row, { onConflict: 'id' });
+      if (error) throw error;
+      await publishRetainerCatalogue(context.state);
+      await writeAuditLog({ eventType: row.published ? 'retainer.catalogue_published' : 'retainer.catalogue_saved', actor: context.actor, summary: `${displayName(context.actor)} updated Retainer Plus offering ${row.title}.`, payload: { offeringId: id, published: row.published } });
+      return json(await retainerSnapshot(context.state));
+    }
+
+    if (action === 'retainer_update_inquiry') {
+      if (!canManageRetainers(context.actor)) return json({ error: 'Admin or Operations access is required.' }, 403);
+      const inquiryId = String(body.inquiryId ?? '');
+      const status = String(body.status ?? '');
+      const assigneeIds = Array.isArray(body.assigneeIds) ? [...new Set(body.assigneeIds.map(String))] : [];
+      if (!inquiryId || !retainerStatuses.has(status)) return json({ error: 'A valid inquiry and status are required.' }, 400);
+      const allowedIds = new Set(context.state.members.filter((member) => member.benefitPrograms?.includes('FR Partners')).map((member) => member.id));
+      if (assigneeIds.some((id) => !allowedIds.has(id))) return json({ error: 'Only Partners™ members can be assigned.' }, 400);
+      await callRetainerBridge({ action: 'update_inquiry', inquiryId, status, assigneeIds });
+      const { error: deleteError } = await supabase.from('workspace_retainer_assignments').delete().eq('inquiry_id', inquiryId);
+      if (deleteError) throw deleteError;
+      if (assigneeIds.length) {
+        const { error: insertError } = await supabase.from('workspace_retainer_assignments').insert(assigneeIds.map((memberId) => ({ inquiry_id: inquiryId, member_id: memberId, created_by: context.actor.id })));
+        if (insertError) throw insertError;
+      }
+      await writeAuditLog({ eventType: 'retainer.inquiry_updated', actor: context.actor, summary: `${displayName(context.actor)} updated Retainer Plus inquiry ${inquiryId}.`, payload: { inquiryId, status, assigneeIds } });
+      return json(await retainerSnapshot(context.state));
+    }
 
     if (action === 'complete_entra_setup') {
       const preferredName = String(body.preferredName ?? '').trim().slice(0, 80);

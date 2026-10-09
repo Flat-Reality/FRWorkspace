@@ -1,6 +1,6 @@
 import { emptyMember, initialFileProjects, initialGuidePages, initialLevels, initialMembers, initialRewards, initialWorkRecords } from './data';
 import { supabase } from './supabase';
-import type { AuditLogEntry, EntraDevice, FileProject, FileResource, GitHubSnapshot, ScheduleDayCompletion, ScheduleShift, UpworkContractDraft, UpworkSnapshot, WorkspaceMember, WorkspaceState } from './types';
+import type { AuditLogEntry, EntraDevice, FileProject, FileResource, GitHubSnapshot, RetainerOffering, RetainerSnapshot, ScheduleDayCompletion, ScheduleShift, UpworkContractDraft, UpworkSnapshot, WorkspaceMember, WorkspaceState } from './types';
 
 const STORAGE_KEY = 'flat-reality-workspace-state';
 
@@ -352,6 +352,18 @@ export async function impersonateWorkspaceMember(sessionToken: string, memberId:
 export async function listWorkspaceAuditLogs(sessionToken: string, limit = 200): Promise<AuditLogEntry[]> {
   const response = await callWorkspaceApi<{ logs: AuditLogEntry[] }>({ action: 'list_logs', sessionToken, limit });
   return response.logs ?? [];
+}
+
+export async function getRetainerSnapshot(sessionToken: string): Promise<RetainerSnapshot> {
+  return callWorkspaceApi<RetainerSnapshot>({ action: 'retainer_snapshot', sessionToken });
+}
+
+export async function saveRetainerOffering(sessionToken: string, offering: RetainerOffering): Promise<RetainerSnapshot> {
+  return callWorkspaceApi<RetainerSnapshot>({ action: 'retainer_save_offering', sessionToken, offering });
+}
+
+export async function updateRetainerInquiry(sessionToken: string, inquiryId: string, status: string, assigneeIds: string[]): Promise<RetainerSnapshot> {
+  return callWorkspaceApi<RetainerSnapshot>({ action: 'retainer_update_inquiry', sessionToken, inquiryId, status, assigneeIds });
 }
 
 export async function loadWorkspaceState(sessionToken?: string): Promise<WorkspaceState> {

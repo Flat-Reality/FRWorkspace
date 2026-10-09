@@ -119,6 +119,55 @@ export type AuditLogEntry = {
   createdAt: string;
 };
 
+export type RetainerOffering = {
+  id: string;
+  type: 'specialist' | 'team' | 'capacity';
+  category: string;
+  title: string;
+  description: string;
+  tags: string[];
+  roles: string[];
+  published: boolean;
+  staffingRules: {
+    requiredSkills?: string[];
+    requiredRoles?: string[];
+    minimumPeople?: number;
+    confirmedReservableCapacity?: boolean;
+  };
+  internalRateEur: number | null;
+  availability: 'available' | 'limited' | 'unavailable' | 'unknown';
+  reasonCode: string;
+  checkedAt: string;
+  updatedAt: string;
+};
+
+export type RetainerInquiry = {
+  id: string;
+  reference: string;
+  createdAt: string;
+  updatedAt: string;
+  name: string;
+  organization: string;
+  email: string;
+  projectUrl: string;
+  projectDescription: string;
+  selectedServices: string[];
+  budgetRange: string;
+  timeline: string;
+  status: 'new' | 'reviewing' | 'contacted' | 'proposal' | 'won' | 'lost' | 'spam';
+  privacyAcknowledged: boolean;
+  privacyNoticeVersion: string;
+  marketingConsent: boolean;
+  configuration: Record<string, unknown>;
+  assigneeIds: string[];
+};
+
+export type RetainerSnapshot = {
+  offerings: RetainerOffering[];
+  inquiries: RetainerInquiry[];
+  partners: Array<{ id: string; name: string; jobRole: string; seniority: string; partnerStatus: PartnerStatus }>;
+};
+
 export type WorkRecord = {
   id: string;
   memberId: string;

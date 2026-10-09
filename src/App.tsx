@@ -69,7 +69,7 @@ import {
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveWorkspaceState, signOutEntra, startEntraLogin } from './storage';
+import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, updateRetainerInquiry } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -87,6 +87,8 @@ import type {
   OnboardingContractType,
   PartnerStatus,
   Reward,
+  RetainerOffering,
+  RetainerSnapshot,
   ScheduleDayCompletion,
   ScheduleDayStatus,
   ScheduleShift,
@@ -99,7 +101,7 @@ import type {
   WorkspaceState,
 } from './types';
 
-type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files';
+type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'retainer' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files';
 type AdminModule = 'home' | 'hr' | 'partners' | 'guides' | 'levelup' | 'logs' | 'supabase';
 type HrTab = 'overview' | 'contact' | 'records' | 'access' | 'devices' | 'levelup' | 'payments' | 'documents' | 'careerGrowth' | 'partners' | 'experiments';
 type ProfileTab = 'profile' | 'contact' | 'payments' | 'skills' | 'integrations';
@@ -895,6 +897,7 @@ export default function App() {
         ];
 
   if (currentMember?.isAdmin && currentMember.status !== 'suspended') navItems.push(['admin', UsersRound, 'Admin']);
+  if ((currentMember?.isAdmin || currentMember?.permissions?.includes('Operations')) && currentMember.status !== 'suspended') navItems.push(['retainer', BriefcaseBusiness, 'Retainer+']);
 
   const mobileNavItems = [...navItems];
   const mobileAdminIndex = mobileNavItems.findIndex(([key]) => key === 'admin');
@@ -1364,6 +1367,7 @@ export default function App() {
               onFocusModeChange={setAdminFocusMode}
             />
           )}
+          {view === 'retainer' && (currentMember.isAdmin || currentMember.permissions?.includes('Operations')) && <RetainerAdmin />}
         </div>
       </div>
       <nav className="mobile-tabbar fixed inset-x-0 bottom-0 z-40 grid grid-flow-col auto-cols-fr gap-1 rounded-t-[24px] border-x-0 border-b-0 border-t border-line bg-paper/95 px-2 pt-2 shadow-soft backdrop-blur lg:hidden">
@@ -3895,8 +3899,49 @@ function AdminMemberLevelUpTab({ member, levels, rewards, updateMember }: { memb
 }
 
 function AdminMemberPartnersTab({ member, upwork, message }: { member: WorkspaceMember; upwork: UpworkSnapshot; message: string }) {
+  const [retainer, setRetainer] = useState<RetainerSnapshot | null>(null);
+  const [retainerMessage, setRetainerMessage] = useState('Loading Retainer+ assignments...');
+
+  async function loadRetainers() {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    try {
+      setRetainer(await getRetainerSnapshot(token));
+      setRetainerMessage('');
+    } catch (error) {
+      setRetainerMessage(error instanceof Error ? error.message : 'Retainer+ assignments could not be loaded.');
+    }
+  }
+
+  async function toggleAssignment(inquiryId: string, assigned: boolean) {
+    const token = getStoredSession()?.token;
+    const inquiry = retainer?.inquiries.find((item) => item.id === inquiryId);
+    if (!token || !inquiry) return;
+    const assigneeIds = assigned ? [...new Set([...inquiry.assigneeIds, member.id])] : inquiry.assigneeIds.filter((id) => id !== member.id);
+    try {
+      setRetainer(await updateRetainerInquiry(token, inquiry.id, inquiry.status, assigneeIds));
+      setRetainerMessage('Assignment saved.');
+    } catch (error) {
+      setRetainerMessage(error instanceof Error ? error.message : 'Assignment could not be saved.');
+    }
+  }
+
+  useEffect(() => { void loadRetainers(); }, [member.id]);
+
   return (
     <div className="grid gap-6 rounded-xl border border-line bg-paper p-6 shadow-soft">
+      <Section title="Retainer+ Assignments">
+        {retainerMessage && <p className="text-sm text-zinc-500">{retainerMessage}</p>}
+        <div className="grid gap-3">
+          {retainer?.inquiries.filter((inquiry) => !['lost', 'won', 'spam'].includes(inquiry.status)).map((inquiry) => (
+            <label key={inquiry.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-line bg-mist p-4">
+              <input className="mt-1 accent-[#7F00FF]" type="checkbox" checked={inquiry.assigneeIds.includes(member.id)} onChange={(event) => void toggleAssignment(inquiry.id, event.target.checked)} />
+              <span><span className="block font-semibold">{inquiry.reference} · {inquiry.name}</span><span className="mt-1 block text-sm text-zinc-500">{inquiry.organization || 'Independent client'} · {inquiry.status}</span></span>
+            </label>
+          ))}
+          {retainer && !retainer.inquiries.some((inquiry) => !['lost', 'won', 'spam'].includes(inquiry.status)) && <p className="text-sm text-zinc-500">No open Retainer+ inquiries.</p>}
+        </div>
+      </Section>
       <Section title="Partners™">
         <div className="rounded-xl border border-line bg-mist p-4">
           <div>
@@ -3924,6 +3969,51 @@ function AdminMemberPartnersTab({ member, upwork, message }: { member: Workspace
       </Section>
     </div>
   );
+}
+
+function RetainerAdmin() {
+  const [snapshot, setSnapshot] = useState<RetainerSnapshot | null>(null);
+  const [tab, setTab] = useState<'inquiries' | 'catalogue'>('inquiries');
+  const [message, setMessage] = useState('Loading Retainer+...');
+
+  async function load() {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    try { setSnapshot(await getRetainerSnapshot(token)); setMessage(''); }
+    catch (error) { setMessage(error instanceof Error ? error.message : 'Retainer+ could not be loaded.'); }
+  }
+
+  async function updateInquiry(inquiryId: string, status: string, assigneeIds: string[]) {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    try { setSnapshot(await updateRetainerInquiry(token, inquiryId, status, assigneeIds)); setMessage('Inquiry saved.'); }
+    catch (error) { setMessage(error instanceof Error ? error.message : 'Inquiry could not be saved.'); }
+  }
+
+  async function saveOffering(offering: RetainerOffering) {
+    const token = getStoredSession()?.token;
+    if (!token) return;
+    try { setSnapshot(await saveRetainerOffering(token, offering)); setMessage('Catalogue and public availability synchronized.'); }
+    catch (error) { setMessage(error instanceof Error ? error.message : 'Offering could not be saved.'); }
+  }
+
+  function patchOffering(id: string, changes: Partial<RetainerOffering>) {
+    setSnapshot((current) => current ? { ...current, offerings: current.offerings.map((item) => item.id === id ? { ...item, ...changes } : item) } : current);
+  }
+
+  function addOffering() {
+    const id = `new-offering-${Date.now()}`;
+    const offering: RetainerOffering = { id, type: 'specialist', category: 'Production', title: 'New Offering', description: '', tags: [], roles: [], published: false, staffingRules: { requiredSkills: [], requiredRoles: [] }, internalRateEur: null, availability: 'unknown', reasonCode: 'staffing_rules_required', checkedAt: '', updatedAt: '' };
+    setSnapshot((current) => current ? { ...current, offerings: [...current.offerings, offering] } : current);
+  }
+
+  useEffect(() => { void load(); }, []);
+  const statuses = ['new', 'reviewing', 'contacted', 'proposal', 'won', 'lost', 'spam'];
+
+  return <div className="grid gap-6">
+    <section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Partners™</p><div className="mt-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><h1 className="text-3xl font-semibold">Retainer+</h1><p className="mt-2 text-sm text-zinc-500">Private inquiry operations and public catalogue availability.</p></div><button className="inline-flex h-10 items-center gap-2 rounded-lg border border-line px-4 text-sm font-semibold" onClick={() => void load()}><RefreshCw size={16} />Refresh</button></div><div className="mt-5 flex gap-2">{(['inquiries', 'catalogue'] as const).map((item) => <button key={item} className={`h-10 rounded-lg px-4 text-sm font-semibold capitalize ${tab === item ? 'bg-ink text-white' : 'bg-mist text-zinc-600'}`} onClick={() => setTab(item)}>{item}</button>)}</div>{message && <p className="mt-4 text-sm text-zinc-500">{message}</p>}</section>
+    {tab === 'inquiries' ? <div className="grid gap-4">{snapshot?.inquiries.map((inquiry) => <article key={inquiry.id} className="rounded-xl border border-line bg-paper p-5 shadow-soft"><div className="flex flex-col justify-between gap-4 lg:flex-row"><div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-forest">{inquiry.reference}</p><h2 className="mt-2 text-xl font-semibold">{inquiry.name}{inquiry.organization ? ` · ${inquiry.organization}` : ''}</h2><a className="mt-1 block text-sm text-forest" href={`mailto:${inquiry.email}`}>{inquiry.email}</a></div><select className="h-10 rounded-lg border border-line bg-paper px-3 text-sm font-semibold" value={inquiry.status} onChange={(event) => void updateInquiry(inquiry.id, event.target.value, inquiry.assigneeIds)}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></div><p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-zinc-600">{inquiry.projectDescription}</p><div className="mt-4 grid gap-2 rounded-lg bg-mist p-4 text-sm"><p><b>Services:</b> {inquiry.selectedServices.join(', ') || 'Custom team'}</p><p><b>Budget:</b> {inquiry.budgetRange || 'Not provided'} · <b>Timeline:</b> {inquiry.timeline || 'Not provided'}</p><p><b>Consent:</b> {inquiry.privacyAcknowledged ? `Confirmed (${inquiry.privacyNoticeVersion})` : 'Missing'} · Marketing {inquiry.marketingConsent ? 'yes' : 'no'}</p></div><fieldset className="mt-4"><legend className="text-sm font-semibold">Assignments</legend><div className="mt-2 flex flex-wrap gap-2">{snapshot.partners.map((partner) => { const assigned = inquiry.assigneeIds.includes(partner.id); return <label key={partner.id} className={`cursor-pointer rounded-full border px-3 py-2 text-sm ${assigned ? 'border-forest bg-forest/10 text-forest' : 'border-line bg-paper text-zinc-600'}`}><input className="sr-only" type="checkbox" checked={assigned} onChange={(event) => void updateInquiry(inquiry.id, inquiry.status, event.target.checked ? [...inquiry.assigneeIds, partner.id] : inquiry.assigneeIds.filter((id) => id !== partner.id))} />{partner.name} · {partner.partnerStatus === 'working_hours' ? 'Busy' : partner.partnerStatus}</label>})}</div></fieldset></article>)}{snapshot && !snapshot.inquiries.length && <p className="rounded-xl border border-line bg-paper p-6 text-sm text-zinc-500">No Retainer+ inquiries yet.</p>}</div> : <div className="grid gap-4"><button className="inline-flex h-10 w-fit items-center gap-2 rounded-lg bg-forest px-4 text-sm font-semibold text-white" onClick={addOffering}><Plus size={16} />Add offering</button>{snapshot?.offerings.map((offering) => <article key={offering.id} className="rounded-xl border border-line bg-paper p-5 shadow-soft"><div className="grid gap-4 md:grid-cols-2"><Field label="Title" value={offering.title} onChange={(value) => patchOffering(offering.id, { title: value })} /><Field label="Category" value={offering.category} onChange={(value) => patchOffering(offering.id, { category: value })} /><SelectField label="Type" value={offering.type} options={['specialist', 'team', 'capacity']} onChange={(value) => patchOffering(offering.id, { type: value as RetainerOffering['type'] })} /><Field label="Private Internal Rate (€)" type="number" value={offering.internalRateEur ?? ''} onChange={(value) => patchOffering(offering.id, { internalRateEur: value === '' ? null : Number(value) })} /><div className="md:col-span-2"><Field label="Public Description" value={offering.description} onChange={(value) => patchOffering(offering.id, { description: value })} /></div><Field label="Public Tags (comma separated)" value={offering.tags.join(', ')} onChange={(value) => patchOffering(offering.id, { tags: value.split(',').map((item) => item.trim()).filter(Boolean) })} /><Field label="Public Team Roles (comma separated)" value={offering.roles.join(', ')} onChange={(value) => patchOffering(offering.id, { roles: value.split(',').map((item) => item.trim()).filter(Boolean) })} /><Field label="Required Skills (private)" value={(offering.staffingRules.requiredSkills ?? []).join(', ')} onChange={(value) => patchOffering(offering.id, { staffingRules: { ...offering.staffingRules, requiredSkills: value.split(',').map((item) => item.trim()).filter(Boolean) } })} /><Field label="Required Roles (private)" value={(offering.staffingRules.requiredRoles ?? []).join(', ')} onChange={(value) => patchOffering(offering.id, { staffingRules: { ...offering.staffingRules, requiredRoles: value.split(',').map((item) => item.trim()).filter(Boolean) } })} /></div><div className="mt-4 flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-semibold">Availability: {offering.availability}</p><p className="text-xs text-zinc-500">{offering.reasonCode || 'Not evaluated'}</p></div><div className="flex items-center gap-3"><label className="inline-flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={offering.published} onChange={(event) => patchOffering(offering.id, { published: event.target.checked })} />Published</label>{offering.type === 'capacity' && <label className="inline-flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={Boolean(offering.staffingRules.confirmedReservableCapacity)} onChange={(event) => patchOffering(offering.id, { staffingRules: { ...offering.staffingRules, confirmedReservableCapacity: event.target.checked } })} />Capacity confirmed</label>}<button className="h-10 rounded-lg bg-ink px-4 text-sm font-semibold text-white" onClick={() => void saveOffering(offering)}>Save & sync</button></div></div></article>)}</div>}
+  </div>;
 }
 
 function UpworkContractWizard({ member, onClose, onCreated }: { member: WorkspaceMember; onClose: () => void; onCreated: (snapshot: UpworkSnapshot) => void }) {
