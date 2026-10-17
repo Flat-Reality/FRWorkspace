@@ -59,6 +59,8 @@ type WorkspaceMember = {
   permissionDetails?: string[];
   upworkRequired?: boolean;
   allowLegacyLogin?: boolean;
+  suspendedLegacyUntil?: string;
+  accessSyncPending?: boolean;
   githubConnected?: boolean;
   githubUsername?: string;
   githubUserId?: string;
@@ -397,28 +399,58 @@ function applyEntraAccess(member: WorkspaceMember, groupKeys: Set<string>) {
   return { ...member, contractType, permissions, permissionDetails, benefitPrograms, isAdmin: groupKeys.has('administration') };
 }
 
-async function reconcileAccessFromEntra(state: WorkspaceState, actor: WorkspaceMember) {
+async function retryPendingAccessGroups(state: WorkspaceState) {
+  const pending = state.members.filter((member) => member.accessSyncPending && member.status !== 'suspended');
+  const succeeded = new Map<string, string>();
+  const warnings: string[] = [];
+  if (!pending.length) return { succeeded, warnings };
+  const groups = await loadAccessGroups();
+  const token = await getGraphAccessToken();
+  for (const member of pending) {
+    const memberWarnings: string[] = [];
+    try {
+      if (member.entraObjectId || member.entraEmail) memberWarnings.push(...await syncMemberAccessGroups(member, groups, token));
+      memberWarnings.push(...await syncGitHubAccess([member.id]));
+    } catch (error) {
+      memberWarnings.push(error instanceof Error ? error.message : 'Access synchronization failed.');
+    }
+    if (memberWarnings.length) warnings.push(...memberWarnings.map((warning) => `${displayName(member)}: ${warning}`));
+    else succeeded.set(member.id, JSON.stringify(accessComparable(member)));
+  }
+  return { succeeded, warnings };
+}
+
+async function reconcileAccessFromEntra(_state: WorkspaceState, actor: WorkspaceMember, pendingSucceeded = new Map<string, string>()) {
+  const { data: snapshot, error: snapshotError } = await supabase.from('workspace_state').select('state, updated_at').eq('id', STATE_ID).single();
+  if (snapshotError || !snapshot?.state) throw snapshotError ?? new Error('Workspace state was not found.');
+  const state = snapshot.state as WorkspaceState;
   const groups = await loadAccessGroups();
   const byId = new Map(groups.map((group) => [group.entra_group_id, group.group_key]));
   const token = await getGraphAccessToken();
   const members: WorkspaceMember[] = [];
   const warnings: string[] = [];
   for (const member of state.members) {
-    if (!member.entraObjectId && !member.entraEmail) {
+    const syncedPending = member.accessSyncPending && pendingSucceeded.get(member.id) === JSON.stringify(accessComparable(member));
+    if (member.accessSyncPending && !syncedPending) {
       members.push(member);
+      continue;
+    }
+    if (!member.entraObjectId && !member.entraEmail) {
+      members.push(syncedPending ? { ...member, accessSyncPending: false } : member);
       continue;
     }
     try {
       const ids = await directEntraGroupIds(member, token);
-      members.push(applyEntraAccess(member, new Set([...ids].map((id) => byId.get(id)).filter(Boolean) as string[])));
+      members.push(applyEntraAccess({ ...member, accessSyncPending: syncedPending ? false : member.accessSyncPending }, new Set([...ids].map((id) => byId.get(id)).filter(Boolean) as string[])));
     } catch (error) {
       members.push(member);
       warnings.push(`${displayName(member)}: ${error instanceof Error ? error.message : 'Entra membership could not be read.'}`);
     }
   }
   const nextState = { ...state, members };
-  const { error } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state: nextState, updated_at: new Date().toISOString() });
+  const { data: saved, error } = await supabase.from('workspace_state').update({ state: nextState, updated_at: new Date().toISOString() }).eq('id', STATE_ID).eq('updated_at', snapshot.updated_at).select('id');
   if (error) throw error;
+  if (!saved?.length) return { state: await loadState(), warnings: [...warnings, 'Workspace changed during reconciliation; the next scheduled run will retry.'] };
   warnings.push(...await syncGitHubAccess(members.map((member) => member.id)));
   await writeAuditLog({ eventType: warnings.length ? 'access.entra_reconcile_partial' : 'access.entra_reconciled', actor, summary: 'Workspace access was reconciled from the canonical Microsoft Entra group matrix.', payload: { warnings } });
   return { state: nextState, warnings };
@@ -652,13 +684,16 @@ async function touchMemberLastSeen(state: WorkspaceState, memberId: string) {
 
 function scrubState(state: WorkspaceState, actor: WorkspaceMember): WorkspaceState {
   const isAdmin = Boolean(actor.isAdmin);
+  const suspended = actor.status === 'suspended';
   const visibleMemberIds = new Set(isAdmin ? state.members.map((member) => member.id) : [actor.id]);
   return {
     ...state,
     members: state.members.filter((member) => visibleMemberIds.has(member.id)).map((member) => ({ ...member, passwordHash: '' })),
     workRecords: state.workRecords.filter((record) => visibleMemberIds.has(record.memberId)),
-    scheduleShifts: state.scheduleShifts.filter((shift) => visibleMemberIds.has(shift.memberId)),
-    scheduleCompletions: state.scheduleCompletions.filter((completion) => visibleMemberIds.has(completion.memberId)),
+    scheduleShifts: suspended ? [] : state.scheduleShifts.filter((shift) => visibleMemberIds.has(shift.memberId)),
+    scheduleCompletions: suspended ? [] : state.scheduleCompletions.filter((completion) => visibleMemberIds.has(completion.memberId)),
+    guidePages: suspended ? [] : state.guidePages,
+    fileProjects: suspended ? [] : state.fileProjects,
   };
 }
 
@@ -691,11 +726,13 @@ async function setCredential(member: WorkspaceMember, passwordHash: string) {
 }
 
 async function createSession(member: WorkspaceMember, authMethod: 'legacy' | 'entra' | 'impersonation' = 'legacy') {
-  if (member.status === 'suspended') throw new Error('Suspended users cannot start a Workspace session.');
+  if (member.status === 'suspended' && (authMethod !== 'legacy' || !canUseSuspendedLegacy(member))) throw new Error('Limited legacy access for this account has expired.');
   const token = bytesToBase64(crypto.getRandomValues(new Uint8Array(32))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
   const tokenHash = await sha256Hex(token);
   const now = Date.now();
-  const expiresAt = new Date(now + (authMethod === 'entra' ? ENTRA_MAX_HOURS * 60 * 60 * 1000 : SESSION_DAYS * 24 * 60 * 60 * 1000)).toISOString();
+  const expiresAt = new Date(member.status === 'suspended'
+    ? Math.min(now + 60 * 60 * 1000, Date.parse(member.suspendedLegacyUntil || ''))
+    : now + (authMethod === 'entra' ? ENTRA_MAX_HOURS * 60 * 60 * 1000 : SESSION_DAYS * 24 * 60 * 60 * 1000)).toISOString();
   const idleExpiresAt = authMethod === 'entra' ? new Date(now + ENTRA_IDLE_HOURS * 60 * 60 * 1000).toISOString() : null;
   const { error } = await supabase.from('workspace_sessions').insert({ token_hash: tokenHash, member_id: member.id, expires_at: expiresAt, idle_expires_at: idleExpiresAt, auth_method: authMethod, last_activity_at: new Date(now).toISOString() });
   if (error) throw error;
@@ -715,7 +752,11 @@ async function actorFromToken(token: string) {
   await supabase.from('workspace_sessions').update({ last_activity_at: now.toISOString(), idle_expires_at: nextIdle }).eq('token_hash', tokenHash);
   const state = await loadState();
   const actor = state.members.find((member) => member.id === data.member_id);
-  return actor && actor.status !== 'suspended' ? { actor, state } : null;
+  return actor && (actor.status !== 'suspended' || (data.auth_method === 'legacy' && canUseSuspendedLegacy(actor))) ? { actor, state } : null;
+}
+
+function canUseSuspendedLegacy(member: WorkspaceMember) {
+  return member.allowLegacyLogin !== false && Boolean(member.suspendedLegacyUntil) && Date.parse(member.suspendedLegacyUntil || '') > Date.now();
 }
 
 function mergeUserState(previous: WorkspaceState, requested: WorkspaceState, actor: WorkspaceMember) {
@@ -740,6 +781,10 @@ function mergeUserState(previous: WorkspaceState, requested: WorkspaceState, act
       explanationSubmittedAt: String(requestedRecord.explanationSubmittedAt || new Date().toISOString()),
     };
   });
+
+  if (actor.status === 'suspended') {
+    return { ...previous, members: previous.members.map((member) => member.id === actor.id ? nextActor : member), workRecords };
+  }
 
   const scheduleShifts = [
     ...previous.scheduleShifts.filter((shift) => shift.memberId !== actor.id),
@@ -884,9 +929,10 @@ Deno.serve(async (request) => {
       const retainerWarnings: string[] = [];
       await publishRetainerCatalogue(state).catch((error) => retainerWarnings.push(error instanceof Error ? error.message : 'Retainer Plus catalogue synchronization failed.'));
       const profileWarnings = await syncAllEntraMembers(state);
-      const reconciled = await reconcileAccessFromEntra(state, actor);
+      const pendingAccess = await retryPendingAccessGroups(state);
+      const reconciled = await reconcileAccessFromEntra(state, actor, pendingAccess.succeeded);
       const upworkWarnings = await syncAllUpworkData();
-      const warnings = [...profileWarnings, ...reconciled.warnings, ...upworkWarnings, ...retainerWarnings];
+      const warnings = [...profileWarnings, ...pendingAccess.warnings, ...reconciled.warnings, ...upworkWarnings, ...retainerWarnings];
       await writeAuditLog({
         eventType: warnings.length ? 'system.scheduled_sync_partial' : 'system.scheduled_sync_completed',
         actor,
@@ -902,7 +948,7 @@ Deno.serve(async (request) => {
       const password = String(body.password ?? '');
       const member = state.members.find((item) => item.employmentId.toLowerCase() === employmentId);
       if (!member) return json({ error: 'Employment ID or password is incorrect.' }, 401);
-      if (member.status === 'suspended') return json({ error: 'This Workspace account has been suspended. Contact your manager.' }, 403);
+      if (member.status === 'suspended' && !canUseSuspendedLegacy(member)) return json({ error: 'Limited legacy access for this account has expired. Contact your manager.' }, 403);
       if (member.allowLegacyLogin === false) return json({ error: 'Legacy sign-in is disabled for this account. Use Microsoft Entra ID.' }, 403);
       const storedHash = await getCredential(member);
       if (!storedHash) return json({ error: 'Password is not set. Use recovery options to create one.' }, 401);
@@ -1023,6 +1069,9 @@ Deno.serve(async (request) => {
 
     const context = await actorFromToken(String(body.sessionToken ?? ''));
     if (!context) return json({ error: 'Session is invalid or expired.' }, 401);
+    if (context.actor.status === 'suspended' && !['load', 'save', 'entra_avatar'].includes(action)) {
+      return json({ error: 'Only limited profile access is available for this account.' }, 403);
+    }
 
     if (action === 'retainer_snapshot') {
       if (!canManageRetainers(context.actor)) return json({ error: 'Admin or Operations access is required.' }, 403);
@@ -1180,7 +1229,7 @@ Deno.serve(async (request) => {
       const target = context.state.members.find((member) => member.id === memberId);
       if (!target) return json({ error: 'User was not found.' }, 404);
 
-      const suspended = { ...target, status: 'suspended', statusUntil: '', partnerStatus: 'inactive', isAdmin: false, permissions: [], permissionDetails: [], benefitPrograms: [] };
+      const suspended = { ...target, status: 'suspended', statusUntil: '', suspendedLegacyUntil: target.status === 'suspended' && target.suspendedLegacyUntil ? target.suspendedLegacyUntil : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(), allowLegacyLogin: true, partnerStatus: 'inactive', isAdmin: false, permissions: [], permissionDetails: [], benefitPrograms: [], accessSyncPending: false };
       const state = { ...context.state, members: context.state.members.map((member) => member.id === memberId ? suspended : member) };
       const { error: saveError } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state, updated_at: new Date().toISOString() });
       if (saveError) throw saveError;
@@ -1258,8 +1307,10 @@ Deno.serve(async (request) => {
       nextState.members = nextState.members.map((member) => {
         const current = currentMembers.get(member.id);
         return current?.status === 'suspended'
-          ? { ...member, status: 'suspended', statusUntil: '', partnerStatus: 'inactive', isAdmin: false, permissions: [], permissionDetails: [], benefitPrograms: [], passwordHash: '' }
-          : { ...member, passwordHash: '' };
+          ? { ...member, status: 'suspended', statusUntil: '', suspendedLegacyUntil: current.suspendedLegacyUntil, allowLegacyLogin: current.allowLegacyLogin, partnerStatus: 'inactive', isAdmin: false, permissions: [], permissionDetails: [], benefitPrograms: [], passwordHash: '' }
+          : current?.accessSyncPending
+            ? { ...member, contractType: current.contractType, permissions: current.permissions, permissionDetails: current.permissionDetails, benefitPrograms: current.benefitPrograms, isAdmin: current.isAdmin, accessSyncPending: true, passwordHash: '' }
+            : { ...member, accessSyncPending: context.actor.isAdmin && (!current || JSON.stringify(accessComparable(current)) !== JSON.stringify(accessComparable(member))), passwordHash: '' };
       });
       const entraValidationError = validateEntraProfiles(nextState);
       if (entraValidationError) return json({ error: entraValidationError }, 400);

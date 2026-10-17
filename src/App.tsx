@@ -821,9 +821,12 @@ export default function App() {
       return;
     }
 
-    saveWorkspaceState(state, sessionToken)
-      .then(() => setSaveStatus(isSupabaseConfigured ? 'Saved to database' : 'Saved locally in this browser'))
-      .catch(() => setSaveStatus('Could not save to database. Local copy is still saved.'));
+    const timeout = window.setTimeout(() => {
+      saveWorkspaceState(state, sessionToken)
+        .then((warnings) => setSaveStatus(warnings.length ? `Saved; access sync pending: ${warnings.join(' | ')}` : isSupabaseConfigured ? 'Saved to database' : 'Saved locally in this browser'))
+        .catch(() => setSaveStatus('Could not save to database. Local copy is still saved.'));
+    }, 400);
+    return () => window.clearTimeout(timeout);
   }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects, isLoaded]);
 
   const currentMember = members.find((member) => member.id === currentMemberId) ?? null;
@@ -1629,7 +1632,7 @@ function Dashboard({
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.14em] text-white/80">Limited Access</p>
                 <h2 className="mt-2 text-2xl font-semibold">Your account has been suspended</h2>
-                <p className="mt-2 max-w-2xl text-white/85">You can still use limited Workspace features. All withheld funds will be transferred using the Supplier Form payout details available in your profile.</p>
+                <p className="mt-2 max-w-2xl text-white/85">You can still use limited Workspace features through legacy eID sign-in{member.suspendedLegacyUntil ? ` until ${formatDate(member.suspendedLegacyUntil)}` : ''}. All withheld funds will be transferred using the Supplier Form payout details available in your profile.</p>
               </div>
             </div>
             <div className="rounded-xl bg-white px-5 py-4 text-right text-red-700">
@@ -3688,7 +3691,7 @@ function AdminAccessRoleTab({ member, updateMember, setMembers, impersonateMembe
   async function unenroll() {
     const token = getStoredSession()?.token;
     if (!token) { setUnenrollResult('Sign in to unenroll this user.'); return; }
-    if (!window.confirm(`Unenroll ${displayName(member)}? Their Workspace profile and history will remain, but sign-in, sessions, Entra access and GitHub organization access will be revoked.`)) return;
+    if (!window.confirm(`Unenroll ${displayName(member)}? Their profile and history will remain. Entra and GitHub access will be revoked; limited eID access will remain for 90 days.`)) return;
     setUnenrollBusy(true);
     setUnenrollResult('');
     try {

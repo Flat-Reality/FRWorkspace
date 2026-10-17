@@ -232,6 +232,8 @@ export type WorkspaceMember = {
   permissionDetails?: string[];
   upworkRequired?: boolean;
   allowLegacyLogin?: boolean;
+  suspendedLegacyUntil?: string;
+  accessSyncPending?: boolean;
   githubConnected?: boolean;
   githubUsername?: string;
   githubUserId?: string;

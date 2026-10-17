@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 import type { AuditLogEntry, EntraDevice, FileProject, FileResource, GitHubSnapshot, RetainerOffering, RetainerSnapshot, ScheduleDayCompletion, ScheduleShift, UpworkContractDraft, UpworkSnapshot, WorkspaceMember, WorkspaceState } from './types';
 
 const STORAGE_KEY = 'flat-reality-workspace-state';
+let workspaceSaveQueue: Promise<unknown> = Promise.resolve();
 
 export type WorkspaceSession = {
   token?: string;
@@ -394,7 +395,10 @@ export async function loadWorkspaceState(sessionToken?: string): Promise<Workspa
 export async function saveWorkspaceState(state: WorkspaceState, sessionToken?: string) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 
-  if (!supabase || !sessionToken) return;
+  if (!supabase || !sessionToken) return [] as string[];
 
-  await callWorkspaceApi({ action: 'save', sessionToken, state });
+  const request = workspaceSaveQueue.then(() => callWorkspaceApi<{ entraSyncWarnings?: string[] }>({ action: 'save', sessionToken, state }));
+  workspaceSaveQueue = request.catch(() => undefined);
+  const response = await request;
+  return response.entraSyncWarnings ?? [];
 }
