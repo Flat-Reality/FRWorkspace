@@ -257,9 +257,9 @@ export async function createUpworkContract(sessionToken: string, draft: UpworkCo
   return response.snapshot;
 }
 
-export async function loginWorkspace(employmentId: string, password: string): Promise<{ session: WorkspaceSession; state: WorkspaceState }> {
-  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState> }>({ action: 'login', employmentId, password });
-  return { session: response.session, state: normalizeWorkspaceState(response.state) };
+export async function loginWorkspace(employmentId: string, password: string): Promise<{ session: WorkspaceSession; state: WorkspaceState; consentRequired: boolean }> {
+  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState>; consentRequired?: boolean }>({ action: 'login', employmentId, password });
+  return { session: response.session, state: normalizeWorkspaceState(response.state), consentRequired: Boolean(response.consentRequired) };
 }
 
 export async function startEntraLogin(): Promise<void> {
@@ -294,12 +294,20 @@ async function waitForEntraAuthSession() {
   return null;
 }
 
-export async function getEntraWorkspaceLogin(): Promise<{ session: WorkspaceSession; state: WorkspaceState; firstLink: boolean } | null> {
+export async function getEntraWorkspaceLogin(): Promise<{ session: WorkspaceSession; state: WorkspaceState; firstLink: boolean; consentRequired: boolean } | null> {
   if (!supabase) return null;
   const session = await waitForEntraAuthSession();
   if (!session?.access_token) return null;
-  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState>; firstLink?: boolean }>({ action: 'entra_login' });
-  return { session: response.session, state: normalizeWorkspaceState(response.state), firstLink: Boolean(response.firstLink) };
+  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState>; firstLink?: boolean; consentRequired?: boolean }>({ action: 'entra_login' });
+  return { session: response.session, state: normalizeWorkspaceState(response.state), firstLink: Boolean(response.firstLink), consentRequired: Boolean(response.consentRequired) };
+}
+
+export async function getPolicyStatus(sessionToken: string): Promise<{ consentRequired: boolean }> {
+  return callWorkspaceApi<{ consentRequired: boolean }>({ action: 'policy_status', sessionToken });
+}
+
+export async function acceptPolicyDocuments(sessionToken: string): Promise<void> {
+  await callWorkspaceApi({ action: 'accept_documents', sessionToken, accept: true });
 }
 
 export async function completeEntraSetup(sessionToken: string, preferredName: string): Promise<WorkspaceState> {
@@ -350,9 +358,9 @@ export async function unenrollWorkspaceMember(sessionToken: string, memberId: st
   return { state: normalizeWorkspaceState(response.state), warnings: response.warnings ?? [] };
 }
 
-export async function impersonateWorkspaceMember(sessionToken: string, memberId: string): Promise<{ session: WorkspaceSession; state: WorkspaceState }> {
-  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState> }>({ action: 'impersonate', sessionToken, memberId });
-  return { session: response.session, state: normalizeWorkspaceState(response.state) };
+export async function impersonateWorkspaceMember(sessionToken: string, memberId: string): Promise<{ session: WorkspaceSession; state: WorkspaceState; consentRequired: boolean }> {
+  const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState>; consentRequired?: boolean }>({ action: 'impersonate', sessionToken, memberId });
+  return { session: response.session, state: normalizeWorkspaceState(response.state), consentRequired: Boolean(response.consentRequired) };
 }
 
 export async function listWorkspaceAuditLogs(sessionToken: string, limit = 200): Promise<AuditLogEntry[]> {

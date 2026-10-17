@@ -8,6 +8,11 @@ const SESSION_DAYS = 90;
 const ENTRA_IDLE_HOURS = 1;
 const ENTRA_MAX_HOURS = 24;
 const AUDIT_RETENTION_DAYS = 90;
+const POLICY_VERSION = 'team-charter-2026-10-17-v2';
+const POLICY_DOCUMENTS = [
+  { title: 'Team Charter', url: 'https://1drv.ms/w/c/2b1c38e256a936a9/IQDn35eFILQoTZ7AfsJW3f7aARc5m-xSdAoPlfW5SOy7giQ?e=dARb0t' },
+  { title: 'Team Charter 2.0', url: 'https://1drv.ms/w/c/2b1c38e256a936a9/IQBW6c5UhiqaRb-f5B3XNwlYARZnqFvIkURVaQDk5VJTJhg?e=tOkSzg' },
+];
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -126,6 +131,22 @@ function timingSafeEqual(a: string, b: string) {
 async function sha256Hex(value: string) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function consentHash(value: string) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(SERVICE_ROLE_KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`workspace-policy:${value}`));
+  return Array.from(new Uint8Array(signature)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function hasPolicyAcceptance(memberId: string) {
+  const { data, error } = await supabase.from('workspace_policy_acceptances').select('member_id').eq('member_id', memberId).eq('document_version', POLICY_VERSION).maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
+function pendingPolicyState(state: WorkspaceState, member: WorkspaceMember): WorkspaceState {
+  return { ...state, members: [{ ...member, passwordHash: '' }], levels: [], rewards: [], guidePages: [], workRecords: [], scheduleShifts: [], scheduleCompletions: [], fileProjects: [] };
 }
 
 async function hashPassword(password: string) {
@@ -958,7 +979,8 @@ Deno.serve(async (request) => {
       const session = await createSession(member);
       state = await touchMemberLastSeen(state, member.id);
       await writeAuditLog({ eventType: 'session.login', actor: member, target: member, summary: `${displayName(member)} signed in.` });
-      return json({ session, state: scrubState(state, { ...member, lastSeenAt: new Date().toISOString() }) });
+      const consentRequired = !await hasPolicyAcceptance(member.id);
+      return json({ session, consentRequired, state: consentRequired ? pendingPolicyState(state, member) : scrubState(state, { ...member, lastSeenAt: new Date().toISOString() }) });
     }
 
     if (action === 'entra_login') {
@@ -1041,7 +1063,8 @@ Deno.serve(async (request) => {
         await writeAuditLog({ eventType: 'identity.entra_linked', actor: linkedMember, target: linkedMember, summary: `${displayName(linkedMember)} linked a Microsoft Entra identity.` });
       }
       await writeAuditLog({ eventType: 'session.entra_login', actor: linkedMember, target: linkedMember, summary: `${displayName(linkedMember)} signed in with Microsoft Entra ID.` });
-      return json({ session, state: scrubState(state, { ...linkedMember, lastSeenAt: new Date().toISOString() }), firstLink });
+      const consentRequired = !await hasPolicyAcceptance(linkedMember.id);
+      return json({ session, consentRequired, state: consentRequired ? pendingPolicyState(state, linkedMember) : scrubState(state, { ...linkedMember, lastSeenAt: new Date().toISOString() }), firstLink });
     }
 
     if (action === 'recovery_options') {
@@ -1069,6 +1092,27 @@ Deno.serve(async (request) => {
 
     const context = await actorFromToken(String(body.sessionToken ?? ''));
     if (!context) return json({ error: 'Session is invalid or expired.' }, 401);
+    const consentRequired = !await hasPolicyAcceptance(context.actor.id);
+    if (action === 'accept_documents') {
+      if (body.accept !== true) return json({ error: 'Explicit acceptance is required.' }, 400);
+      if (consentRequired) {
+        const acceptedAt = new Date().toISOString();
+        const ip = (request.headers.get('x-forwarded-for') || request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || '').split(',')[0].trim();
+        const ipHash = await consentHash(`ip:${ip || 'unavailable'}`);
+        const userAgentHash = await consentHash(`user-agent:${request.headers.get('user-agent') || 'unavailable'}`);
+        const receiptHash = await consentHash(JSON.stringify({ memberId: context.actor.id, version: POLICY_VERSION, documents: POLICY_DOCUMENTS, acceptedAt, ipHash, userAgentHash }));
+        const { error } = await supabase.from('workspace_policy_acceptances').insert({
+          member_id: context.actor.id, document_version: POLICY_VERSION, documents: POLICY_DOCUMENTS,
+          accepted_at: acceptedAt, ip_hash: ipHash, user_agent_hash: userAgentHash, receipt_hash: receiptHash,
+        });
+        if (error && error.code !== '23505') throw error;
+        if (!error) await writeAuditLog({ eventType: 'policy.documents_accepted', actor: context.actor, target: context.actor, summary: `${displayName(context.actor)} accepted the current Team Charter documents.`, payload: { documentVersion: POLICY_VERSION, receiptHash } });
+      }
+      return json({ accepted: true, version: POLICY_VERSION });
+    }
+    if (action === 'policy_status') return json({ consentRequired, version: POLICY_VERSION, documents: POLICY_DOCUMENTS });
+    if (action === 'load' && consentRequired) return json({ state: pendingPolicyState(context.state, context.actor), consentRequired });
+    if (consentRequired) return json({ error: 'Accept the updated policies before opening Workspace.', consentRequired: true }, 403);
     if (context.actor.status === 'suspended' && !['load', 'save', 'entra_avatar'].includes(action)) {
       return json({ error: 'Only limited profile access is available for this account.' }, 403);
     }
@@ -1219,7 +1263,8 @@ Deno.serve(async (request) => {
       const session = await createSession(target, 'impersonation');
       const state = await touchMemberLastSeen(context.state, target.id);
       await writeAuditLog({ eventType: 'session.impersonate', actor: context.actor, target, summary: `${displayName(context.actor)} signed in as ${displayName(target)}.` });
-      return json({ session, state: scrubState(state, target) });
+      const targetConsentRequired = !await hasPolicyAcceptance(target.id);
+      return json({ session, consentRequired: targetConsentRequired, state: targetConsentRequired ? pendingPolicyState(state, target) : scrubState(state, target) });
     }
 
     if (action === 'unenroll_user') {

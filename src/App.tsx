@@ -69,7 +69,7 @@ import {
 import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
-import { checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, unenrollWorkspaceMember, updateRetainerInquiry } from './storage';
+import { acceptPolicyDocuments, checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getPolicyStatus, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, unenrollWorkspaceMember, updateRetainerInquiry } from './storage';
 import type { WorkspaceSession } from './storage';
 import type {
   AuditLogEntry,
@@ -682,6 +682,10 @@ function renderTextMarkup(content: string) {
 }
 
 export default function App() {
+  const policyDocuments = [
+    { title: 'Team Charter', url: 'https://1drv.ms/w/c/2b1c38e256a936a9/IQDn35eFILQoTZ7AfsJW3f7aARc5m-xSdAoPlfW5SOy7giQ?e=dARb0t' },
+    { title: 'Team Charter 2.0', url: 'https://1drv.ms/w/c/2b1c38e256a936a9/IQBW6c5UhiqaRb-f5B3XNwlYARZnqFvIkURVaQDk5VJTJhg?e=tOkSzg' },
+  ];
   const [members, setMembers] = useState<WorkspaceMember[]>(initialMembers);
   const [levels, setLevels] = useState<Level[]>(initialLevels);
   const [rewards, setRewards] = useState<Reward[]>(initialRewards);
@@ -709,6 +713,9 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [isEntraLoginPending, setIsEntraLoginPending] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [policyGate, setPolicyGate] = useState<'checking' | 'required' | 'accepted'>('checking');
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [policyError, setPolicyError] = useState('');
   const [saveStatus, setSaveStatus] = useState('Loading workspace data...');
   const [upworkSnapshot, setUpworkSnapshot] = useState<UpworkSnapshot>(EMPTY_UPWORK_SNAPSHOT);
   const [upworkStatus, setUpworkStatus] = useState('');
@@ -730,6 +737,13 @@ export default function App() {
     return reconciled.members.find((member) => member.id === sessionMemberId) ?? null;
   }
 
+  function startEntraWelcome() {
+    setEntraSetupStage('welcome');
+    window.setTimeout(() => setEntraSetupStage('identity'), 5400);
+    window.setTimeout(() => setEntraSetupStage('orbit'), 7400);
+    window.setTimeout(() => setEntraSetupStage('setup'), 15400);
+  }
+
   useEffect(() => {
     let isMounted = true;
 
@@ -739,8 +753,10 @@ export default function App() {
         if (storedSession?.token) {
           try {
             const state = await loadWorkspaceState(storedSession.token);
+            const policy = await getPolicyStatus(storedSession.token);
             if (!isMounted) return;
             applyLoadedState(state, storedSession.memberId);
+            setPolicyGate(policy.consentRequired ? 'required' : 'accepted');
             setSaveStatus(isSupabaseConfigured ? 'Database connected' : 'Saved locally in this browser');
             return;
           } catch {
@@ -765,6 +781,7 @@ export default function App() {
               const member = applyLoadedState(response.state, response.session.memberId);
               if (!member) throw new Error('The linked Workspace profile was not returned.');
               saveSession(member.id, response.session.token, response.session.expiresAt, response.session.authMethod);
+              setPolicyGate(response.consentRequired ? 'required' : 'accepted');
               window.localStorage.setItem(ENTRA_REMEMBERED_KEY, '1');
               window.sessionStorage.removeItem('flat-reality-workspace-entra-pending');
               window.localStorage.removeItem('flat-reality-workspace-entra-pending');
@@ -772,11 +789,8 @@ export default function App() {
               if (response.firstLink) {
                 setEntraSetupMemberId(member.id);
                 setEntraPreferredName(member.preferredName);
-                setEntraSetupStage('welcome');
-                window.setTimeout(() => setEntraSetupStage('identity'), 5400);
-                window.setTimeout(() => setEntraSetupStage('orbit'), 7400);
-                window.setTimeout(() => setEntraSetupStage('setup'), 15400);
-              } else {
+                if (!response.consentRequired) startEntraWelcome();
+              } else if (!response.consentRequired) {
                 setLoginIntroName(displayName(member));
                 window.setTimeout(() => setLoginIntroName(''), 1150);
               }
@@ -812,7 +826,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || policyGate !== 'accepted') return;
 
     const state: WorkspaceState = { members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects };
     const sessionToken = getStoredSession()?.token;
@@ -827,7 +841,7 @@ export default function App() {
         .catch(() => setSaveStatus('Could not save to database. Local copy is still saved.'));
     }, 400);
     return () => window.clearTimeout(timeout);
-  }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects, isLoaded]);
+  }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects, isLoaded, policyGate]);
 
   const currentMember = members.find((member) => member.id === currentMemberId) ?? null;
 
@@ -844,16 +858,16 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!isLoaded || !currentMemberId) {
+    if (!isLoaded || !currentMemberId || policyGate !== 'accepted') {
       setUpworkSnapshot(EMPTY_UPWORK_SNAPSHOT);
       return;
     }
     void refreshUpwork(currentMemberId);
-  }, [isLoaded, currentMemberId]);
+  }, [isLoaded, currentMemberId, policyGate]);
 
   useEffect(() => {
     const session = getStoredSession();
-    if (!session?.token || !currentMemberId || !currentMember?.entraEmail) {
+    if (!session?.token || !currentMemberId || !currentMember?.entraEmail || policyGate !== 'accepted') {
       setEntraAvatarUrl('');
       return;
     }
@@ -862,10 +876,10 @@ export default function App() {
       .then((url) => { if (active) setEntraAvatarUrl(url); })
       .catch(() => { if (active) setEntraAvatarUrl(''); });
     return () => { active = false; };
-  }, [currentMemberId, currentMember?.entraEmail]);
+  }, [currentMemberId, currentMember?.entraEmail, policyGate]);
 
   useEffect(() => {
-    if (!isLoaded || !currentMemberId) return;
+    if (!isLoaded || !currentMemberId || policyGate !== 'accepted') return;
     const url = new URL(window.location.href);
     const connected = url.searchParams.get('upwork') === 'connected';
     const upworkError = url.searchParams.get('upwork_error');
@@ -879,7 +893,7 @@ export default function App() {
     url.searchParams.delete('upwork');
     url.searchParams.delete('upwork_error');
     window.history.replaceState({}, '', url.toString());
-  }, [isLoaded, currentMemberId]);
+  }, [isLoaded, currentMemberId, policyGate]);
   const currentLevel = currentMember ? getCurrentLevel(levels, currentMember.xp) : levels[0];
   const nextLevel = currentMember ? getNextLevel(levels, currentMember.xp) : null;
   const nextRewards = nextLevel ? rewards.filter((reward) => reward.levelId === nextLevel.id) : [];
@@ -933,8 +947,11 @@ export default function App() {
         setFileProjects(response.state.fileProjects);
         setCurrentMemberId(member.id);
         saveSession(member.id, response.session.token, response.session.expiresAt, response.session.authMethod);
-        setLoginIntroName(displayName(member));
-        window.setTimeout(() => setLoginIntroName(''), 1150);
+        setPolicyGate(response.consentRequired ? 'required' : 'accepted');
+        if (!response.consentRequired) {
+          setLoginIntroName(displayName(member));
+          window.setTimeout(() => setLoginIntroName(''), 1150);
+        }
         setView('dashboard');
         setLoginError('');
         setPassword('');
@@ -1026,6 +1043,7 @@ export default function App() {
         setFileProjects(response.state.fileProjects);
         setCurrentMemberId(member.id);
         saveSession(member.id, response.session.token, response.session.expiresAt, response.session.authMethod);
+        setPolicyGate(response.consentRequired ? 'required' : 'accepted');
         setView('dashboard');
       } catch {
         setSaveStatus('Could not sign in as this user.');
@@ -1035,6 +1053,7 @@ export default function App() {
 
     setCurrentMemberId(memberId);
     saveSession(memberId);
+    setPolicyGate('accepted');
     setView('dashboard');
   }
 
@@ -1050,8 +1069,27 @@ export default function App() {
   async function signOut() {
     clearSession();
     setCurrentMemberId(null);
+    setPolicyGate('checking');
     setShowLegacyLogin(false);
     await signOutEntra().catch(() => undefined);
+  }
+
+  async function acceptPolicies() {
+    const session = getStoredSession();
+    if (!session?.token) return;
+    setPolicyBusy(true);
+    setPolicyError('');
+    try {
+      await acceptPolicyDocuments(session.token);
+      const state = await loadWorkspaceState(session.token);
+      applyLoadedState(state, session.memberId);
+      setPolicyGate('accepted');
+      if (entraSetupMemberId === session.memberId) startEntraWelcome();
+    } catch (error) {
+      setPolicyError(error instanceof Error ? error.message : 'Could not record your acceptance. Please try again.');
+    } finally {
+      setPolicyBusy(false);
+    }
   }
 
   if (!isLoaded) {
@@ -1182,6 +1220,38 @@ export default function App() {
             onClose={() => setIsRecoveryOpen(false)}
           />
         )}
+      </main>
+    );
+  }
+
+  if (policyGate !== 'accepted') {
+    return (
+      <main className="min-h-screen bg-mist px-5 py-10 text-ink">
+        <div className="mx-auto grid min-h-[calc(100vh-5rem)] max-w-2xl place-items-center">
+          {policyGate === 'checking' ? (
+            <p className="text-sm text-zinc-600">Checking your policy acknowledgement...</p>
+          ) : (
+            <section className="w-full rounded-lg border border-line bg-paper p-6 shadow-soft sm:p-9" aria-labelledby="policy-title">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#7F00FF]/10 text-[#7F00FF]"><FileCheck2 size={25} /></div>
+              <p className="mt-6 text-xs font-semibold uppercase text-[#7F00FF]">Flat Reality Workspace</p>
+              <h1 id="policy-title" className="mt-2 text-3xl font-semibold">We're updating our policies</h1>
+              <p className="mt-3 text-sm leading-6 text-zinc-600">Please review both documents before continuing to Workspace.</p>
+              <div className="mt-7 grid gap-3">
+                {policyDocuments.map((document) => (
+                  <a key={document.title} className="flex items-center gap-4 rounded-lg border border-line p-4 transition hover:border-[#7F00FF] hover:bg-[#7F00FF]/5" href={document.url} target="_blank" rel="noopener noreferrer">
+                    <FileText className="shrink-0 text-[#7F00FF]" size={23} />
+                    <span className="min-w-0 flex-1 font-medium">{document.title}</span>
+                    <ExternalLink className="shrink-0 text-zinc-500" size={17} />
+                  </a>
+                ))}
+              </div>
+              <p className="mt-6 text-xs leading-5 text-zinc-500">By selecting Agree and continue, you confirm that you have reviewed and agree to both documents. Your acceptance will be recorded with the date and security metadata.</p>
+              {policyError && <p className="mt-4 text-sm text-red-600" role="alert">{policyError}</p>}
+              <button className="mt-6 h-12 w-full rounded-lg bg-[#7F00FF] px-5 font-semibold text-white transition hover:bg-[#6900d1] disabled:opacity-60" type="button" disabled={policyBusy} onClick={() => void acceptPolicies()}>{policyBusy ? 'Recording acceptance...' : 'Agree and continue'}</button>
+              <button className="mt-4 w-full text-sm text-zinc-500 hover:text-ink" type="button" onClick={() => void signOut()}>Sign out</button>
+            </section>
+          )}
+        </div>
       </main>
     );
   }
