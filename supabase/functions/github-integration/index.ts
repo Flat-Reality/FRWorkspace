@@ -147,6 +147,12 @@ async function appJwt() {
   return `${input}.${base64Url(new Uint8Array(signature))}`;
 }
 
+class GitHubApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 async function githubRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${GITHUB_API}${path}`, {
     ...init,
@@ -160,7 +166,7 @@ async function githubRequest<T>(path: string, token: string, init: RequestInit =
   });
   if (response.status === 204) return null as T;
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.message || `GitHub returned ${response.status}.`);
+  if (!response.ok) throw new GitHubApiError(payload?.message || `GitHub returned ${response.status}.`, response.status);
   return payload as T;
 }
 
@@ -348,7 +354,7 @@ async function revokeOrganizationAccess(memberId: string) {
   try {
     await githubRequest(`/orgs/${encodeURIComponent(organization)}/memberships/${encodeURIComponent(data.github_username)}`, token, { method: 'DELETE' });
   } catch (error) {
-    if (!(error instanceof Error && /not found|404/i.test(error.message))) throw error;
+    if (!(error instanceof GitHubApiError && error.status === 404)) throw error;
   }
   const { error: updateError } = await supabase.from('workspace_github_connections').update({ membership_state: 'pending', team_slugs: [], sync_error: '', last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('member_id', memberId);
   if (updateError) throw updateError;
