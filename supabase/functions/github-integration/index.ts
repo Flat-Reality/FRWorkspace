@@ -28,6 +28,7 @@ type WorkspaceMember = {
   githubAvatarUrl?: string;
   githubProfileUrl?: string;
   isAdmin?: boolean;
+  status?: string;
 };
 
 type WorkspaceState = { members: WorkspaceMember[] };
@@ -92,7 +93,7 @@ async function actorFromToken(token: string): Promise<ActorContext | null> {
   if (!data || new Date(data.expires_at) <= new Date()) return null;
   const state = await loadState();
   const actor = state.members.find((member) => member.id === data.member_id);
-  return actor ? { actor, state } : null;
+  return actor && actor.status !== 'suspended' ? { actor, state } : null;
 }
 
 async function audit(eventType: string, actor: WorkspaceMember, summary: string, payload: Record<string, unknown> = {}) {
@@ -195,6 +196,7 @@ async function loadAccessGroups(): Promise<AccessGroup[]> {
 }
 
 function desiredAccessGroupKeys(member: WorkspaceMember) {
+  if (member.status === 'suspended') return new Set<string>();
   const keys = new Set<string>();
   if (member.contractType === 'CORE TEAM') keys.add('core_team');
   if (member.contractType === 'INDEPENDENT PARTNER') keys.add('independent_partner');
@@ -336,13 +338,27 @@ async function removeManagedTeamAccess(memberId: string) {
   return warnings;
 }
 
+async function revokeOrganizationAccess(memberId: string) {
+  const { data, error } = await supabase.from('workspace_github_connections').select('*').eq('member_id', memberId).maybeSingle();
+  if (error) throw error;
+  if (!data) return [] as string[];
+  const secrets = await getSecrets();
+  const organization = secrets.github_organization || 'Flat-Reality';
+  const token = await installationToken();
+  try {
+    await githubRequest(`/orgs/${encodeURIComponent(organization)}/memberships/${encodeURIComponent(data.github_username)}`, token, { method: 'DELETE' });
+  } catch (error) {
+    if (!(error instanceof Error && /not found|404/i.test(error.message))) throw error;
+  }
+  const { error: updateError } = await supabase.from('workspace_github_connections').update({ membership_state: 'pending', team_slugs: [], sync_error: '', last_synced_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('member_id', memberId);
+  if (updateError) throw updateError;
+  return [] as string[];
+}
+
 async function synchronizeConnectedMembers(memberIds: string[], removedMemberIds: string[] = []) {
   const state = await loadState();
   const selected = new Set(memberIds);
   const members = selected.size ? state.members.filter((member) => selected.has(member.id)) : removedMemberIds.length ? [] : state.members;
-  const secrets = await getSecrets();
-  const organization = secrets.github_organization || 'Flat-Reality';
-  await ensureAccessTeams(await installationToken(), organization);
   const warnings: string[] = [];
   for (const member of members) {
     const { data, error } = await supabase.from('workspace_github_connections').select('*').eq('member_id', member.id).maybeSingle();
@@ -352,6 +368,10 @@ async function synchronizeConnectedMembers(memberIds: string[], removedMemberIds
     }
     if (!data) continue;
     try {
+      if (member.status === 'suspended') {
+        warnings.push(...(await revokeOrganizationAccess(member.id)).map((warning) => `${displayName(member)}: ${warning}`));
+        continue;
+      }
       const access = await synchronizeAccess(member, { id: Number(data.github_user_id), login: data.github_username, html_url: data.profile_url, avatar_url: data.avatar_url, email: data.email });
       warnings.push(...access.warnings.map((warning) => `${displayName(member)}: ${warning}`));
     } catch (error) {
@@ -360,7 +380,7 @@ async function synchronizeConnectedMembers(memberIds: string[], removedMemberIds
   }
   for (const memberId of removedMemberIds) {
     try {
-      warnings.push(...(await removeManagedTeamAccess(memberId)).map((warning) => `${memberId}: ${warning}`));
+      warnings.push(...(await revokeOrganizationAccess(memberId)).map((warning) => `${memberId}: ${warning}`));
     } catch (error) {
       warnings.push(`${memberId}: ${error instanceof Error ? error.message : 'GitHub team access could not be removed.'}`);
     }
@@ -400,6 +420,7 @@ async function callback(url: URL) {
     const state = await loadState();
     const member = state.members.find((item) => item.id === oauthState.member_id);
     if (!member) throw new Error('Workspace profile was not found.');
+    if (member.status === 'suspended') throw new Error('This Workspace account has been suspended.');
     const access = await synchronizeAccess(member, profile);
     const nextMember = { ...member, githubConnected: true, githubUsername: profile.login, githubUserId: String(profile.id), githubAvatarUrl: profile.avatar_url ?? '', githubProfileUrl: profile.html_url ?? '' };
     const nextState = { ...state, members: state.members.map((item) => item.id === member.id ? nextMember : item) };

@@ -24,6 +24,7 @@ type WorkspaceMember = {
   steamId?: string;
   steamProfileUrl?: string;
   isAdmin?: boolean;
+  status?: string;
 };
 
 type WorkspaceState = { members: WorkspaceMember[] };
@@ -74,7 +75,7 @@ async function actorFromToken(token: string) {
   if (!data || new Date(data.expires_at) <= new Date()) return null;
   const state = await loadState();
   const actor = state.members.find((member) => member.id === data.member_id);
-  return actor ? { actor, state } : null;
+  return actor && actor.status !== 'suspended' ? { actor, state } : null;
 }
 
 async function audit(eventType: string, actor: WorkspaceMember, summary: string, payload: Record<string, unknown> = {}) {
@@ -134,6 +135,7 @@ async function callback(url: URL) {
     const state = await loadState();
     const member = state.members.find((item) => item.id === openidState.member_id);
     if (!member) throw new Error('Workspace profile was not found.');
+    if (member.status === 'suspended') throw new Error('This Workspace account has been suspended.');
     const { error } = await supabase.from('workspace_steam_connections').upsert({
       member_id: member.id,
       steam_id: steamId,

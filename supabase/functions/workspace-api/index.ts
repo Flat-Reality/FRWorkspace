@@ -256,6 +256,7 @@ async function loadAccessGroups(): Promise<AccessGroup[]> {
 
 function desiredAccessGroupKeys(member: WorkspaceMember) {
   const keys = new Set<string>();
+  if (member.status === 'suspended') return keys;
   if (member.contractType === 'CORE TEAM') keys.add('core_team');
   if (member.contractType === 'INDEPENDENT PARTNER') keys.add('independent_partner');
 
@@ -367,6 +368,7 @@ async function syncChangedAccessGroups(before: WorkspaceState, after: WorkspaceS
 }
 
 function applyEntraAccess(member: WorkspaceMember, groupKeys: Set<string>) {
+  if (member.status === 'suspended') return member;
   const managedRoles = new Set(['Admin', 'Community', 'Developer', 'HR', 'Operations', 'Creative']);
   const permissions = (member.permissions ?? []).filter((value) => !managedRoles.has(value));
   if (groupKeys.has('administration')) permissions.push('Admin');
@@ -689,6 +691,7 @@ async function setCredential(member: WorkspaceMember, passwordHash: string) {
 }
 
 async function createSession(member: WorkspaceMember, authMethod: 'legacy' | 'entra' | 'impersonation' = 'legacy') {
+  if (member.status === 'suspended') throw new Error('Suspended users cannot start a Workspace session.');
   const token = bytesToBase64(crypto.getRandomValues(new Uint8Array(32))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
   const tokenHash = await sha256Hex(token);
   const now = Date.now();
@@ -712,7 +715,7 @@ async function actorFromToken(token: string) {
   await supabase.from('workspace_sessions').update({ last_activity_at: now.toISOString(), idle_expires_at: nextIdle }).eq('token_hash', tokenHash);
   const state = await loadState();
   const actor = state.members.find((member) => member.id === data.member_id);
-  return actor ? { actor, state } : null;
+  return actor && actor.status !== 'suspended' ? { actor, state } : null;
 }
 
 function mergeUserState(previous: WorkspaceState, requested: WorkspaceState, actor: WorkspaceMember) {
@@ -899,6 +902,7 @@ Deno.serve(async (request) => {
       const password = String(body.password ?? '');
       const member = state.members.find((item) => item.employmentId.toLowerCase() === employmentId);
       if (!member) return json({ error: 'Employment ID or password is incorrect.' }, 401);
+      if (member.status === 'suspended') return json({ error: 'This Workspace account has been suspended. Contact your manager.' }, 403);
       if (member.allowLegacyLogin === false) return json({ error: 'Legacy sign-in is disabled for this account. Use Microsoft Entra ID.' }, 403);
       const storedHash = await getCredential(member);
       if (!storedHash) return json({ error: 'Password is not set. Use recovery options to create one.' }, 401);
@@ -975,6 +979,7 @@ Deno.serve(async (request) => {
       }
 
       const wasLinked = Boolean(member.entraObjectId);
+      if (member.status === 'suspended') return json({ error: 'This Workspace account has been suspended. Contact your manager.' }, 403);
       const firstLink = !wasLinked || !member.entraSetupCompleted;
       const linkedMember = { ...member, entraEmail, entraObjectId, workEmail: undefined };
       state = {
@@ -997,7 +1002,7 @@ Deno.serve(async (request) => {
       const state = await loadState();
       const employmentId = String(body.employmentId ?? '').trim().toLowerCase();
       const member = state.members.find((item) => item.employmentId.toLowerCase() === employmentId);
-      if (!member || member.allowLegacyLogin === false || (await getCredential(member))) {
+      if (!member || member.status === 'suspended' || member.allowLegacyLogin === false || (await getCredential(member))) {
         return json({ error: 'Recovery wizard cannot be used with these details. Contact your manager for manual recovery.' }, 403);
       }
       return json({ ok: true });
@@ -1008,7 +1013,7 @@ Deno.serve(async (request) => {
       const employmentId = String(body.employmentId ?? '').trim().toLowerCase();
       const password = String(body.password ?? '');
       const member = state.members.find((item) => item.employmentId.toLowerCase() === employmentId);
-      if (!member || member.allowLegacyLogin === false || (await getCredential(member))) {
+      if (!member || member.status === 'suspended' || member.allowLegacyLogin === false || (await getCredential(member))) {
         return json({ error: 'Recovery wizard cannot be used with these details. Contact your manager for manual recovery.' }, 403);
       }
       if (password.length < 10) return json({ error: 'Password must contain at least 10 characters.' }, 400);
@@ -1161,10 +1166,65 @@ Deno.serve(async (request) => {
       const memberId = String(body.memberId ?? '');
       const target = context.state.members.find((member) => member.id === memberId);
       if (!target) return json({ error: 'User was not found.' }, 404);
+      if (target.status === 'suspended') return json({ error: 'Suspended users cannot be impersonated.' }, 403);
       const session = await createSession(target, 'impersonation');
       const state = await touchMemberLastSeen(context.state, target.id);
       await writeAuditLog({ eventType: 'session.impersonate', actor: context.actor, target, summary: `${displayName(context.actor)} signed in as ${displayName(target)}.` });
       return json({ session, state: scrubState(state, target) });
+    }
+
+    if (action === 'unenroll_user') {
+      if (!context.actor.isAdmin) return json({ error: 'Admin access is required.' }, 403);
+      const memberId = String(body.memberId ?? '');
+      if (memberId === context.actor.id) return json({ error: 'You cannot unenroll your own account.' }, 400);
+      const target = context.state.members.find((member) => member.id === memberId);
+      if (!target) return json({ error: 'User was not found.' }, 404);
+
+      const suspended = { ...target, status: 'suspended', statusUntil: '', partnerStatus: 'inactive', isAdmin: false, permissions: [], permissionDetails: [], benefitPrograms: [] };
+      const state = { ...context.state, members: context.state.members.map((member) => member.id === memberId ? suspended : member) };
+      const { error: saveError } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state, updated_at: new Date().toISOString() });
+      if (saveError) throw saveError;
+
+      const warnings: string[] = [];
+      const { error: sessionsError } = await supabase.from('workspace_sessions').delete().eq('member_id', memberId);
+      if (sessionsError) warnings.push(`Workspace sessions: ${sessionsError.message}`);
+
+      if (target.entraObjectId || target.entraEmail) {
+        try {
+          const token = await getGraphAccessToken();
+          const userId = String(target.entraObjectId || target.entraEmail);
+          try {
+            await graphRequest(`/users/${encodeURIComponent(userId)}`, token, { method: 'PATCH', body: JSON.stringify({ accountEnabled: false }) });
+          } catch (error) {
+            warnings.push(`Microsoft Entra account: ${error instanceof Error ? error.message : 'Could not disable sign-in.'}`);
+          }
+          try {
+            await graphRequest(`/users/${encodeURIComponent(userId)}/revokeSignInSessions`, token, { method: 'POST' });
+          } catch (error) {
+            warnings.push(`Microsoft Entra sessions: ${error instanceof Error ? error.message : 'Could not revoke sign-in sessions.'}`);
+          }
+          try {
+            warnings.push(...(await syncMemberAccessGroups(suspended, await loadAccessGroups(), token)).map((warning) => `Microsoft Entra groups: ${warning}`));
+          } catch (error) {
+            warnings.push(`Microsoft Entra groups: ${error instanceof Error ? error.message : 'Could not remove access groups.'}`);
+          }
+        } catch (error) {
+          warnings.push(`Microsoft Entra: ${error instanceof Error ? error.message : 'Could not connect to Microsoft Graph.'}`);
+        }
+      } else {
+        warnings.push('Microsoft Entra: no identity is linked to this profile; verify manually if an account exists.');
+      }
+
+      try {
+        warnings.push(...(await syncGitHubAccess([memberId])).map((warning) => `GitHub: ${warning}`));
+      } catch (error) {
+        warnings.push(`GitHub: ${error instanceof Error ? error.message : 'Could not remove organization access.'}`);
+      }
+      if (!target.githubConnected && !target.githubUsername) {
+        warnings.push('GitHub: no identity is linked to this profile; verify organization membership manually.');
+      }
+      await writeAuditLog({ eventType: warnings.length ? 'user.unenroll_partial' : 'user.unenrolled', actor: context.actor, target, summary: `${displayName(context.actor)} unenrolled ${displayName(target)}.`, payload: { warnings } });
+      return json({ state: scrubState(state, context.actor), warnings });
     }
 
     if (action === 'list_logs') {
@@ -1194,7 +1254,13 @@ Deno.serve(async (request) => {
     if (action === 'save') {
       const requestedState = body.state as WorkspaceState;
       const nextState = context.actor.isAdmin ? requestedState : mergeUserState(context.state, requestedState, context.actor);
-      nextState.members = nextState.members.map((member) => ({ ...member, passwordHash: '' }));
+      const currentMembers = new Map(context.state.members.map((member) => [member.id, member]));
+      nextState.members = nextState.members.map((member) => {
+        const current = currentMembers.get(member.id);
+        return current?.status === 'suspended'
+          ? { ...member, status: 'suspended', statusUntil: '', partnerStatus: 'inactive', isAdmin: false, permissions: [], permissionDetails: [], benefitPrograms: [], passwordHash: '' }
+          : { ...member, passwordHash: '' };
+      });
       const entraValidationError = validateEntraProfiles(nextState);
       if (entraValidationError) return json({ error: entraValidationError }, 400);
       const { error } = await supabase.from('workspace_state').upsert({ id: STATE_ID, state: nextState, updated_at: new Date().toISOString() });

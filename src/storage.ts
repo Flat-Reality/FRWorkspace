@@ -344,6 +344,11 @@ export async function resetWorkspacePassword(sessionToken: string, memberId: str
   await callWorkspaceApi({ action: 'reset_password', sessionToken, memberId });
 }
 
+export async function unenrollWorkspaceMember(sessionToken: string, memberId: string): Promise<{ state: WorkspaceState; warnings: string[] }> {
+  const response = await callWorkspaceApi<{ state: Partial<WorkspaceState>; warnings?: string[] }>({ action: 'unenroll_user', sessionToken, memberId });
+  return { state: normalizeWorkspaceState(response.state), warnings: response.warnings ?? [] };
+}
+
 export async function impersonateWorkspaceMember(sessionToken: string, memberId: string): Promise<{ session: WorkspaceSession; state: WorkspaceState }> {
   const response = await callWorkspaceApi<{ session: WorkspaceSession; state: Partial<WorkspaceState> }>({ action: 'impersonate', sessionToken, memberId });
   return { session: response.session, state: normalizeWorkspaceState(response.state) };

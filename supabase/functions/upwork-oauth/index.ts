@@ -38,6 +38,7 @@ type WorkspaceMember = {
   withheldBalance?: number;
   estimatedHours?: string;
   isAdmin?: boolean;
+  status?: string;
 };
 
 type WorkspaceState = { members: WorkspaceMember[] };
@@ -109,7 +110,7 @@ async function actorFromToken(token: string): Promise<ActorContext | null> {
   if (!data || new Date(data.expires_at) <= new Date()) return null;
   const state = await loadState();
   const actor = state.members.find((member) => member.id === data.member_id);
-  return actor ? { actor, state } : null;
+  return actor && actor.status !== 'suspended' ? { actor, state } : null;
 }
 
 function isEligible(member: WorkspaceMember) {
@@ -457,14 +458,13 @@ async function handleCallback(url: URL) {
     return Response.redirect(destination.toString(), 302);
   }
   try {
-    const tokens = await exchangeToken({ grant_type: 'authorization_code', code, redirect_uri: CALLBACK_URL, code_verifier: oauthState.code_verifier });
-    await saveTokens(oauthState.member_id, tokens);
     const state = await loadState();
     const member = state.members.find((item) => item.id === oauthState.member_id);
-    if (member) {
-      await syncMember(member, true).catch(() => undefined);
-      await audit('upwork.connected', member, member, `${displayName(member)} connected Upwork.`);
-    }
+    if (!member || member.status === 'suspended') throw new Error('This Workspace account is no longer active.');
+    const tokens = await exchangeToken({ grant_type: 'authorization_code', code, redirect_uri: CALLBACK_URL, code_verifier: oauthState.code_verifier });
+    await saveTokens(oauthState.member_id, tokens);
+    await syncMember(member, true).catch(() => undefined);
+    await audit('upwork.connected', member, member, `${displayName(member)} connected Upwork.`);
     destination.searchParams.set('upwork', 'connected');
   } catch (error) {
     destination.searchParams.set('upwork_error', error instanceof Error ? error.message : 'Upwork connection failed.');
@@ -486,6 +486,7 @@ Deno.serve(async (request) => {
       const warnings: string[] = [];
       await purgeExpiredCache();
       for (const member of state.members) {
+        if (member.status === 'suspended') continue;
         try {
           await syncMember(member, true);
         } catch (error) {
