@@ -64,6 +64,9 @@ type WorkspaceMember = {
   permissionDetails?: string[];
   upworkRequired?: boolean;
   allowLegacyLogin?: boolean;
+  teamsPersonalEmail?: string;
+  teamsOpenedInviteIds?: string[];
+  teamsSetupStep?: number;
   suspendedLegacyUntil?: string;
   accessSyncPending?: boolean;
   githubConnected?: boolean;
@@ -86,6 +89,7 @@ type WorkspaceState = {
   scheduleShifts: Array<Record<string, unknown> & { memberId: string }>;
   scheduleCompletions: Array<Record<string, unknown> & { memberId: string }>;
   fileProjects: Array<Record<string, unknown> & { id: string; resources?: Array<Record<string, unknown> & { id: string }> }>;
+  teamsInvites?: Array<{ id: string; title: string; url: string; audience: 'all' | 'core' | 'targeted'; projects: string[]; memberIds: string[] }>;
 };
 
 type AuditEvent = {
@@ -715,6 +719,7 @@ function scrubState(state: WorkspaceState, actor: WorkspaceMember): WorkspaceSta
     scheduleCompletions: suspended ? [] : state.scheduleCompletions.filter((completion) => visibleMemberIds.has(completion.memberId)),
     guidePages: suspended ? [] : state.guidePages,
     fileProjects: suspended ? [] : state.fileProjects,
+    teamsInvites: suspended ? [] : (state.teamsInvites ?? []).filter((invite) => isAdmin || invite.audience === 'all' || (invite.audience === 'core' && actor.contractType === 'CORE TEAM') || (invite.audience === 'targeted' && (invite.memberIds?.includes(actor.id) || invite.projects?.some((project) => actor.benefitPrograms?.includes(project))))),
   };
 }
 
@@ -781,7 +786,7 @@ function canUseSuspendedLegacy(member: WorkspaceMember) {
 }
 
 function mergeUserState(previous: WorkspaceState, requested: WorkspaceState, actor: WorkspaceMember) {
-  const allowedMemberFields = new Set(['preferredName', 'phoneNumber', 'timeZone', 'portfolio', 'upworkUrl']);
+  const allowedMemberFields = new Set(['preferredName', 'phoneNumber', 'timeZone', 'portfolio', 'upworkUrl', 'teamsPersonalEmail', 'teamsOpenedInviteIds', 'teamsSetupStep']);
   const requestedActor = requested.members.find((member) => member.id === actor.id);
   const previousActor = previous.members.find((member) => member.id === actor.id);
   if (!requestedActor || !previousActor) return previous;
@@ -790,6 +795,9 @@ function mergeUserState(previous: WorkspaceState, requested: WorkspaceState, act
   allowedMemberFields.forEach((field) => {
     if (field in requestedActor) (nextActor as Record<string, unknown>)[field] = (requestedActor as Record<string, unknown>)[field];
   });
+  nextActor.teamsPersonalEmail = String(nextActor.teamsPersonalEmail ?? '').trim().slice(0, 254);
+  nextActor.teamsOpenedInviteIds = Array.isArray(nextActor.teamsOpenedInviteIds) ? [...new Set(nextActor.teamsOpenedInviteIds.map(String))].slice(0, 100) : [];
+  nextActor.teamsSetupStep = Math.min(3, Math.max(1, Number(nextActor.teamsSetupStep) || 1));
 
   const requestedRecords = new Map(requested.workRecords.filter((record) => record.memberId === actor.id).map((record) => [record.id, record]));
   const workRecords = previous.workRecords.map((record) => {
@@ -1348,6 +1356,10 @@ Deno.serve(async (request) => {
     if (action === 'save') {
       const requestedState = body.state as WorkspaceState;
       const nextState = context.actor.isAdmin ? requestedState : mergeUserState(context.state, requestedState, context.actor);
+      nextState.teamsInvites = context.actor.isAdmin && Array.isArray(requestedState.teamsInvites) ? requestedState.teamsInvites : context.state.teamsInvites;
+      if ((nextState.teamsInvites ?? []).some((invite) => {
+        try { const url = new URL(invite.url); return url.protocol !== 'https:' || url.hostname !== 'teams.live.com'; } catch { return true; }
+      })) return json({ error: 'Teams invitations must use HTTPS links on teams.live.com.' }, 400);
       const currentMembers = new Map(context.state.members.map((member) => [member.id, member]));
       nextState.members = nextState.members.map((member) => {
         const current = currentMembers.get(member.id);

@@ -1,4 +1,4 @@
-import { emptyMember, initialFileProjects, initialGuidePages, initialLevels, initialMembers, initialRewards, initialWorkRecords } from './data';
+import { emptyMember, initialFileProjects, initialGuidePages, initialLevels, initialMembers, initialRewards, initialTeamsInvites, initialWorkRecords } from './data';
 import { supabase } from './supabase';
 import type { AuditLogEntry, EntraDevice, FileProject, FileResource, GitHubSnapshot, RetainerOffering, RetainerSnapshot, ScheduleDayCompletion, ScheduleShift, UpworkContractDraft, UpworkSnapshot, WorkspaceMember, WorkspaceState } from './types';
 
@@ -21,6 +21,7 @@ export const defaultWorkspaceState: WorkspaceState = {
   scheduleShifts: [],
   scheduleCompletions: [],
   fileProjects: initialFileProjects,
+  teamsInvites: initialTeamsInvites,
 };
 
 function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
@@ -113,6 +114,7 @@ export function normalizeWorkspaceState(state: Partial<WorkspaceState>): Workspa
     scheduleShifts: state.scheduleShifts?.map(normalizeShift) ?? [],
     scheduleCompletions: state.scheduleCompletions?.map(normalizeCompletion) ?? [],
     fileProjects: state.fileProjects?.length ? state.fileProjects.map(normalizeFileProject) : defaultWorkspaceState.fileProjects,
+    teamsInvites: [...initialTeamsInvites, ...(state.teamsInvites ?? []).filter((invite) => !initialTeamsInvites.some((item) => item.id === invite.id))],
   };
 }
 

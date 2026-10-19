@@ -232,6 +232,9 @@ export type WorkspaceMember = {
   permissionDetails?: string[];
   upworkRequired?: boolean;
   allowLegacyLogin?: boolean;
+  teamsPersonalEmail?: string;
+  teamsOpenedInviteIds?: string[];
+  teamsSetupStep?: number;
   suspendedLegacyUntil?: string;
   accessSyncPending?: boolean;
   githubConnected?: boolean;
@@ -302,7 +305,16 @@ export type JumpLink = {
   icon: string;
   url: string;
   order: number;
-  internalView?: 'profile' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'levelup' | 'careerGrowth' | 'schedule' | 'files';
+  internalView?: 'profile' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'levelup' | 'careerGrowth' | 'schedule' | 'files' | 'teamAccess';
+};
+
+export type TeamsInvite = {
+  id: string;
+  title: string;
+  url: string;
+  audience: 'all' | 'core' | 'targeted';
+  projects: BenefitProgram[];
+  memberIds: string[];
 };
 
 export type FileResource = {
@@ -334,4 +346,5 @@ export type WorkspaceState = {
   scheduleShifts: ScheduleShift[];
   scheduleCompletions: ScheduleDayCompletion[];
   fileProjects: FileProject[];
+  teamsInvites: TeamsInvite[];
 };

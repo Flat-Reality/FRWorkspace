@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from 'react';
+import type { CSSProperties, Dispatch, FormEvent, ReactNode, SetStateAction } from 'react';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -66,7 +66,7 @@ import {
   WalletCards,
   Zap,
 } from 'lucide-react';
-import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards } from './data';
+import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards, initialTeamsInvites } from './data';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
 import { acceptPolicyDocuments, checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getPolicyStatus, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, unenrollWorkspaceMember, updateRetainerInquiry } from './storage';
@@ -81,6 +81,7 @@ import type {
   GitHubSnapshot,
   GuidePage,
   JumpLink,
+  TeamsInvite,
   Level,
   MemberDocument,
   MemberStatus,
@@ -101,8 +102,8 @@ import type {
   WorkspaceState,
 } from './types';
 
-type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files';
-type AdminModule = 'home' | 'hr' | 'partners' | 'retainer' | 'guides' | 'levelup' | 'logs' | 'supabase';
+type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files' | 'teamAccess';
+type AdminModule = 'home' | 'hr' | 'partners' | 'retainer' | 'guides' | 'levelup' | 'logs' | 'supabase' | 'teams';
 type HrTab = 'overview' | 'contact' | 'records' | 'access' | 'devices' | 'levelup' | 'payments' | 'documents' | 'careerGrowth' | 'partners' | 'experiments';
 type ProfileTab = 'profile' | 'contact' | 'payments' | 'skills' | 'integrations';
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
@@ -113,6 +114,8 @@ const SESSION_DURATION_MS = 90 * 24 * 60 * 60 * 1000;
 const publicAsset = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, '')}`;
 const BRAND_ICON = publicAsset('resources/favicon/favicon-32x32.png');
 const ENTRA_ICON = publicAsset('resources/logos/entra-id.png');
+const TEAMS_ICON = publicAsset('resources/icons/TeamsAccessIcon.png');
+const TEAMS_HEADER = publicAsset('resources/icons/TeamsMoveHeader.png');
 const ENTRA_SCAN_ANIMATION = 'https://assets-v2.lottiefiles.com/a/5ef1272e-117c-11ee-b2c4-a7c896093f14/z2bONj3JN4.lottie';
 const ENTRA_EMAIL_DOMAINS = ['flatreality.eu', 'flatrealitycompany.onmicrosoft.com'];
 const EMPTY_UPWORK_SNAPSHOT: UpworkSnapshot = {
@@ -243,6 +246,10 @@ function isUpworkProfileUrl(value: string) {
 
 function isFrPartnersConnected(member: WorkspaceMember) {
   return member.benefitPrograms.includes('FR Partners');
+}
+
+function canSeeTeamsInvite(member: WorkspaceMember, invite: TeamsInvite) {
+  return invite.audience === 'all' || (invite.audience === 'core' && member.contractType === 'CORE TEAM') || (invite.audience === 'targeted' && (invite.memberIds.includes(member.id) || invite.projects.some((project) => member.benefitPrograms.includes(project))));
 }
 
 function projectLabel(project: BenefitProgram) {
@@ -693,6 +700,7 @@ export default function App() {
   const [scheduleShifts, setScheduleShifts] = useState<ScheduleShift[]>([]);
   const [scheduleCompletions, setScheduleCompletions] = useState<ScheduleDayCompletion[]>([]);
   const [fileProjects, setFileProjects] = useState<FileProject[]>(initialFileProjects);
+  const [teamsInvites, setTeamsInvites] = useState<TeamsInvite[]>(initialTeamsInvites);
   const [jumpLinks] = useState<JumpLink[]>(initialJumpLinks);
   const [guidePages, setGuidePages] = useState<GuidePage[]>(initialGuidePages);
   const [employmentId, setEmploymentId] = useState('');
@@ -731,6 +739,7 @@ export default function App() {
     setScheduleShifts(state.scheduleShifts);
     setScheduleCompletions(state.scheduleCompletions);
     setFileProjects(state.fileProjects);
+    setTeamsInvites(state.teamsInvites);
     if (sessionMemberId && reconciled.members.some((member) => member.id === sessionMemberId)) {
       setCurrentMemberId(sessionMemberId);
     }
@@ -828,7 +837,7 @@ export default function App() {
   useEffect(() => {
     if (!isLoaded || policyGate !== 'accepted') return;
 
-    const state: WorkspaceState = { members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects };
+    const state: WorkspaceState = { members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects, teamsInvites };
     const sessionToken = getStoredSession()?.token;
     if (isSupabaseConfigured && !sessionToken) {
       setSaveStatus('Sign in to connect database');
@@ -841,7 +850,7 @@ export default function App() {
         .catch(() => setSaveStatus('Could not save to database. Local copy is still saved.'));
     }, 400);
     return () => window.clearTimeout(timeout);
-  }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects, isLoaded, policyGate]);
+  }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects, teamsInvites, isLoaded, policyGate]);
 
   const currentMember = members.find((member) => member.id === currentMemberId) ?? null;
 
@@ -945,6 +954,7 @@ export default function App() {
         setScheduleShifts(response.state.scheduleShifts);
         setScheduleCompletions(response.state.scheduleCompletions);
         setFileProjects(response.state.fileProjects);
+        setTeamsInvites(response.state.teamsInvites);
         setCurrentMemberId(member.id);
         saveSession(member.id, response.session.token, response.session.expiresAt, response.session.authMethod);
         setPolicyGate(response.consentRequired ? 'required' : 'accepted');
@@ -1041,6 +1051,7 @@ export default function App() {
         setScheduleShifts(response.state.scheduleShifts);
         setScheduleCompletions(response.state.scheduleCompletions);
         setFileProjects(response.state.fileProjects);
+        setTeamsInvites(response.state.teamsInvites);
         setCurrentMemberId(member.id);
         saveSession(member.id, response.session.token, response.session.expiresAt, response.session.authMethod);
         setPolicyGate(response.consentRequired ? 'required' : 'accepted');
@@ -1418,6 +1429,7 @@ export default function App() {
           {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} setWorkRecords={updateWorkRecords} />}
           {view === 'signedDocuments' && <SignedDocuments member={currentMember} />}
           {view === 'files' && <FilesPage member={currentMember} fileProjects={fileProjects} setFileProjects={setFileProjects} />}
+          {view === 'teamAccess' && (currentMember.status === 'suspended' ? <Placeholder title="Team Access" text="This account no longer has access to team channels." /> : <TeamAccessPage member={currentMember} invites={teamsInvites} updateMember={updateCurrentMember} />)}
           {view === 'benefits' && <Placeholder title="Benefits" text="We are working on integrating this feature into Workspace!" />}
           {view === 'installs' && <InstallsPage member={currentMember} />}
           {view === 'guides' && <Guides pages={guidePages} />}
@@ -1428,6 +1440,8 @@ export default function App() {
               rewards={rewards}
               guidePages={guidePages}
               workRecords={workRecords}
+              teamsInvites={teamsInvites}
+              setTeamsInvites={setTeamsInvites}
               setMembers={(next) => updateMembers(typeof next === 'function' ? next(members) : next)}
               setLevels={setLevels}
               setRewards={setRewards}
@@ -1851,7 +1865,7 @@ function Dashboard({
             const content = (
               <>
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-mist text-zinc-700">
-                  <Icon size={19} />
+                  {link.icon === 'Teams' ? <img className="h-6 w-6 object-contain" src={TEAMS_ICON} alt="" /> : <Icon size={19} />}
                 </span>
                 <span className="font-medium">{link.title}</span>
               </>
@@ -3093,6 +3107,40 @@ function SignedDocuments({ member }: { member: WorkspaceMember }) {
   );
 }
 
+function TeamAccessPage({ member, invites, updateMember }: { member: WorkspaceMember; invites: TeamsInvite[]; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
+  const [email, setEmail] = useState(member.teamsPersonalEmail ?? '');
+  const [error, setError] = useState('');
+  const step = member.teamsPersonalEmail ? Math.max(2, member.teamsSetupStep ?? 2) : 1;
+  const available = invites.filter((invite) => canSeeTeamsInvite(member, invite));
+
+  function requestAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalized = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+      setError('Enter a valid personal Microsoft account email.');
+      return;
+    }
+    setError('');
+    updateMember({ teamsPersonalEmail: normalized, teamsSetupStep: 2 });
+  }
+
+  function openInvite(invite: TeamsInvite) {
+    const opened = member.teamsOpenedInviteIds ?? [];
+    if (!opened.includes(invite.id)) updateMember({ teamsOpenedInviteIds: [...opened, invite.id] });
+  }
+
+  return <div className="grid gap-5">
+    <section className="relative overflow-hidden rounded-lg border border-line bg-[#e9e8fb] p-6 sm:p-8">
+      <img className="absolute inset-0 h-full w-full object-cover opacity-30" src={TEAMS_HEADER} alt="" />
+      <div className="relative max-w-2xl"><img className="h-12 w-12 object-contain" src={TEAMS_ICON} alt="" /><h1 className="mt-4 text-3xl font-semibold">We're moving!</h1><p className="mt-2 text-base leading-6 text-zinc-700">From now on, we communicate in Teams: one place for our team, clients, and independent partners.</p></div>
+    </section>
+    <div className="flex gap-2 text-sm font-medium text-zinc-500">{['Microsoft account', 'Install Teams', 'Join channels'].map((label, index) => <span key={label} className={`rounded-md px-3 py-2 ${step === index + 1 ? 'bg-[#6264a7] text-white' : 'bg-paper'}`}>{index + 1}. {label}</span>)}</div>
+    {step === 1 && <form className="grid max-w-2xl gap-5 rounded-lg border border-line bg-paper p-6 shadow-soft" onSubmit={requestAccess}><div><h2 className="text-xl font-semibold">Your personal Microsoft account</h2><p className="mt-2 text-sm leading-6 text-zinc-600">You can use any personal Microsoft account. We recommend creating a separate personal account for work to keep distractions away.</p></div><label className="grid gap-2 text-sm font-medium">Microsoft account email<input className="h-11 rounded-lg border border-line px-3 outline-none focus:border-[#6264a7]" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>{error && <p role="alert" className="text-sm text-red-600">{error}</p>}<button className="h-11 justify-self-start rounded-lg bg-[#6264a7] px-5 text-sm font-semibold text-white" type="submit">Request access</button></form>}
+    {step === 2 && <section className="grid max-w-2xl gap-5 rounded-lg border border-line bg-paper p-6 shadow-soft"><div><h2 className="text-xl font-semibold">Install Microsoft Teams</h2><p className="mt-2 text-sm text-zinc-600">Install Teams on your computer and/or mobile device, then sign in with {member.teamsPersonalEmail}.</p></div><div className="flex flex-wrap gap-3"><a className="rounded-lg border border-line px-4 py-2 text-sm font-semibold text-[#6264a7]" href="https://www.microsoft.com/en-us/microsoft-teams/download-app" target="_blank" rel="noreferrer">Download Teams <ExternalLink className="ml-1 inline" size={15} /></a><a className="rounded-lg border border-line px-4 py-2 text-sm font-semibold text-[#6264a7]" href="https://support.microsoft.com/en-us/teams/free/settings/sign-in-sign-up-sign-out-and-add-a-new-account-in-microsoft-teams-free" target="_blank" rel="noreferrer">Sign in on your phone with a QR code <ExternalLink className="ml-1 inline" size={15} /></a></div><button className="h-11 justify-self-start rounded-lg bg-[#6264a7] px-5 text-sm font-semibold text-white" onClick={() => updateMember({ teamsSetupStep: 3 })}>Continue</button></section>}
+    {step >= 3 && <section className="grid gap-4"><div><h2 className="text-xl font-semibold">Join your channels</h2><p className="mt-1 text-sm text-zinc-600">Open each invitation while signed in with {member.teamsPersonalEmail}. A check mark records that you opened the link; Teams confirms membership separately.</p></div><div className="grid gap-3 sm:grid-cols-2">{available.map((invite) => <a key={invite.id} className="flex min-h-20 items-center gap-3 rounded-lg border border-line bg-paper p-4 shadow-soft hover:border-[#6264a7]" href={invite.url} target="_blank" rel="noopener noreferrer" onClick={() => openInvite(invite)}><img className="h-8 w-8 object-contain" src={TEAMS_ICON} alt="" /><span className="min-w-0 flex-1 font-semibold">{invite.title}</span>{member.teamsOpenedInviteIds?.includes(invite.id) ? <span className="flex items-center gap-1 text-sm font-semibold text-emerald-700"><CheckCircle2 size={17} />Joined</span> : <ExternalLink className="text-zinc-400" size={18} />}</a>)}</div></section>}
+  </div>;
+}
+
 function FilesPage({ member, fileProjects, setFileProjects }: { member: WorkspaceMember; fileProjects: FileProject[]; setFileProjects: Dispatch<SetStateAction<FileProject[]>> }) {
   const [activeProjectId, setActiveProjectId] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
@@ -3359,6 +3407,8 @@ function Admin({
   rewards,
   guidePages,
   workRecords,
+  teamsInvites,
+  setTeamsInvites,
   setMembers,
   setLevels,
   setRewards,
@@ -3374,6 +3424,8 @@ function Admin({
   rewards: Reward[];
   guidePages: GuidePage[];
   workRecords: WorkRecord[];
+  teamsInvites: TeamsInvite[];
+  setTeamsInvites: Dispatch<SetStateAction<TeamsInvite[]>>;
   setMembers: Dispatch<SetStateAction<WorkspaceMember[]>>;
   setLevels: Dispatch<SetStateAction<Level[]>>;
   setRewards: Dispatch<SetStateAction<Reward[]>>;
@@ -3392,6 +3444,7 @@ function Admin({
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
   if (module === 'logs') return <AdminLogs members={members} onBack={() => setModule('home')} />;
+  if (module === 'teams') return <TeamsInvitesAdmin members={members} invites={teamsInvites} setInvites={setTeamsInvites} onBack={() => setModule('home')} />;
 
   const modules: Array<[AdminModule, LucideIcon, string, string]> = [
     ['hr', UsersRound, 'HR', 'Users, contracts, documents, payments, statuses and work records.'],
@@ -3400,6 +3453,7 @@ function Admin({
     ['guides', BookOpen, 'Guide Writting', 'Create and edit workspace guide pages.'],
     ['levelup', Trophy, 'LevelUp! Configurator', 'Configure levels, XP requirements and rewards.'],
     ['logs', FileText, 'Logs', 'Review sessions, profile changes and workspace data edits.'],
+    ['teams', UsersRound, 'Teams Invites', 'Manage additional channel invitations by project or person.'],
     ['supabase', ExternalLink, 'Supabase Control', 'Open the connected Supabase project dashboard.'],
   ];
 
@@ -3435,6 +3489,27 @@ function Admin({
       </div>
     </div>
   );
+}
+
+function TeamsInvitesAdmin({ members, invites, setInvites, onBack }: { members: WorkspaceMember[]; invites: TeamsInvite[]; setInvites: Dispatch<SetStateAction<TeamsInvite[]>>; onBack: () => void }) {
+  const [title, setTitle] = useState('');
+  const [url, setUrl] = useState('');
+  const [audience, setAudience] = useState<TeamsInvite['audience']>('targeted');
+  const [projects, setProjects] = useState<BenefitProgram[]>([]);
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [error, setError] = useState('');
+
+  function addInvite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    let parsed: URL;
+    try { parsed = new URL(url.trim()); } catch { setError('Enter a valid Teams invitation URL.'); return; }
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'teams.live.com') { setError('Use a teams.live.com invitation URL.'); return; }
+    if (audience === 'targeted' && !projects.length && !memberIds.length) { setError('Select at least one project or person.'); return; }
+    setInvites((current) => [...current, { id: `teams-custom-${crypto.randomUUID()}`, title: title.trim(), url: parsed.toString(), audience, projects: audience === 'targeted' ? projects : [], memberIds: audience === 'targeted' ? memberIds : [] }]);
+    setTitle(''); setUrl(''); setProjects([]); setMemberIds([]); setError('');
+  }
+
+  return <div className="grid gap-5"><BackButton onBack={onBack} /><section className="rounded-lg border border-line bg-paper p-6 shadow-soft"><div className="flex items-center gap-3"><img className="h-10 w-10 object-contain" src={TEAMS_ICON} alt="" /><div><h1 className="text-2xl font-semibold">Teams Invites</h1><p className="text-sm text-zinc-600">Add channel links for everyone, Core Team, selected projects, or people.</p></div></div></section><form className="grid gap-4 rounded-lg border border-line bg-paper p-6 shadow-soft" onSubmit={addInvite}><h2 className="text-lg font-semibold">New invitation</h2><div className="grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm font-medium">Channel name<input required className="h-11 rounded-lg border border-line px-3" value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="grid gap-2 text-sm font-medium">Teams invite URL<input required type="url" className="h-11 rounded-lg border border-line px-3" value={url} onChange={(event) => setUrl(event.target.value)} /></label></div><label className="grid max-w-xs gap-2 text-sm font-medium">Audience<select className="h-11 rounded-lg border border-line px-3" value={audience} onChange={(event) => setAudience(event.target.value as TeamsInvite['audience'])}><option value="all">Everyone</option><option value="core">Core Team</option><option value="targeted">Projects or people</option></select></label>{audience === 'targeted' && <div className="grid gap-4 md:grid-cols-2"><fieldset className="grid content-start gap-2 rounded-lg border border-line p-4"><legend className="px-1 text-sm font-semibold">Projects</legend>{benefitProgramOptions.map((project) => <label key={project} className="flex gap-2 text-sm"><input type="checkbox" checked={projects.includes(project)} onChange={() => setProjects((current) => current.includes(project) ? current.filter((item) => item !== project) : [...current, project])} />{projectLabel(project)}</label>)}</fieldset><fieldset className="max-h-52 overflow-y-auto rounded-lg border border-line p-4"><legend className="px-1 text-sm font-semibold">People</legend><div className="grid gap-2">{members.filter((member) => member.status !== 'suspended').map((member) => <label key={member.id} className="flex gap-2 text-sm"><input type="checkbox" checked={memberIds.includes(member.id)} onChange={() => setMemberIds((current) => current.includes(member.id) ? current.filter((id) => id !== member.id) : [...current, member.id])} />{displayName(member)}</label>)}</div></fieldset></div>}{error && <p role="alert" className="text-sm text-red-600">{error}</p>}<button className="h-11 justify-self-start rounded-lg bg-[#6264a7] px-5 text-sm font-semibold text-white" type="submit">Add invitation</button></form><section className="grid gap-3"><h2 className="text-xl font-semibold">Current invitations</h2>{invites.map((invite) => <div key={invite.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-paper p-4"><img className="h-8 w-8 object-contain" src={TEAMS_ICON} alt="" /><div className="min-w-0 flex-1"><p className="font-semibold">{invite.title}</p><p className="truncate text-xs text-zinc-500">{invite.audience === 'all' ? 'Everyone' : invite.audience === 'core' ? 'Core Team' : [...invite.projects.map(projectLabel), ...invite.memberIds.map((id) => { const person = members.find((member) => member.id === id); return person ? displayName(person) : id; })].join(', ')}</p></div>{invite.id.startsWith('teams-custom-') && <button className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-600" type="button" onClick={() => setInvites((current) => current.filter((item) => item.id !== invite.id))}>Remove</button>}</div>)}</section></div>;
 }
 
 function BackButton({ onBack }: { onBack: () => void }) {
@@ -3706,6 +3781,7 @@ function AdminOverviewTab({ member, records, avatarUrl, upwork, updateMember }: 
     <OnboardingProgressCard member={member} updateMember={updateMember} />
     <section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Contact Information</h2><div className="mt-5 grid gap-x-8 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">{[[Mail, 'Personal Email', member.personalEmail], [ShieldCheck, 'Entra ID', member.entraEmail], [Phone, 'Phone', member.phoneNumber], [MessageCircle, 'Slack', member.slackTag ?? ''], [MapPin, 'Time Zone', member.timeZone]].map(([Icon, label, value]) => { const ContactIcon = Icon as LucideIcon; return <div key={String(label)} className="flex gap-3"><ContactIcon className="mt-0.5 text-zinc-400" size={18} /><div><p className="text-xs font-medium text-zinc-500">{String(label)}</p><p className="mt-1 text-sm font-semibold">{String(value || 'Not provided')}</p></div></div>; })}</div></section>
     <section className="rounded-xl border border-line bg-paper p-6 shadow-soft"><h2 className="text-xl font-semibold">Integrations</h2><div className="mt-4 flex flex-wrap gap-3"><IntegrationBadge label="Microsoft Entra ID" connected={Boolean(member.entraSetupCompleted)} icon={<img className="h-5 w-5" src={ENTRA_ICON} alt="" />} /><IntegrationBadge label="Upwork" connected={upwork.connected} icon={<span className="text-xs font-black">up</span>} /><IntegrationBadge label="GitHub" connected={Boolean(member.githubConnected)} icon={<Github size={18} />} /><IntegrationBadge label="Steamworks" connected={Boolean(member.steamConnected)} icon={<img className="h-5 w-5 rounded bg-black object-contain" src={publicAsset('resources/logos/steam.jpg')} alt="" />} /></div></section>
+    {Boolean(member.teamsPersonalEmail && member.teamsOpenedInviteIds?.length) && <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[#6264a7]/25 bg-[#6264a7]/5 p-4"><img className="h-7 w-7 object-contain" src={TEAMS_ICON} alt="" /><span className="font-semibold">Teams link opened</span><span className="break-all text-sm text-zinc-600">{member.teamsPersonalEmail}</span></div>}
     <div className={`grid gap-4 ${partner ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>{partner && <GaugeCard label="Partner Index" value={index} />}<GaugeCard label="Account Health" value={health * 33.33} displayValue={`${health}/3`} /><div className="kpi-card rounded-xl border border-line bg-paper p-5 shadow-soft"><Timer className="text-forest" size={25} /><p className="mt-8 text-4xl font-semibold">{formatPlannerTime(trackedHours)}</p><p className="mt-2 text-sm font-semibold text-zinc-600">Tracked Work Time</p></div><div className="kpi-card rounded-xl border border-line bg-paper p-5 shadow-soft md:col-span-1"><BriefcaseBusiness className="text-forest" size={25} /><p className="mt-8 text-xl font-semibold">{activeContract?.title || member.onboarding.contractType}</p><p className="mt-2 text-sm font-semibold text-zinc-600">Current Contract</p></div></div>
     <SkillsPanel member={member} editable admin updateMember={updateMember} />
   </div>;

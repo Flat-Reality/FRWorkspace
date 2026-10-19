@@ -1,4 +1,4 @@
-import type { FileProject, GuidePage, JumpLink, Level, Reward, WorkRecord, WorkspaceMember } from './types';
+import type { FileProject, GuidePage, JumpLink, Level, Reward, TeamsInvite, WorkRecord, WorkspaceMember } from './types';
 
 export const benefitProgramOptions = ['FR Partners', 'The Nick', 'RAIN HEART'] as const;
 
@@ -86,6 +86,7 @@ export const initialRewards: Reward[] = [
 ];
 
 export const initialJumpLinks: JumpLink[] = [
+  { id: 'jump-team-access', title: 'Team Access', icon: 'Teams', url: '#team-access', order: 0, internalView: 'teamAccess' },
   { id: 'jump-1', title: 'Social Benefits', icon: 'HeartHandshake', url: 'https://tally.so/r/EkYpQq', order: 1 },
   { id: 'jump-4', title: 'Work Records', icon: 'ClipboardList', url: '#work-records', order: 2, internalView: 'workRecords' },
   { id: 'jump-6', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 3 },
@@ -93,6 +94,14 @@ export const initialJumpLinks: JumpLink[] = [
   { id: 'jump-8', title: 'Signed Documents', icon: 'FileCheck2', url: '#signed-documents', order: 5, internalView: 'signedDocuments' },
   { id: 'jump-10', title: 'Files', icon: 'Folder', url: '#files', order: 6, internalView: 'files' },
   { id: 'jump-9', title: 'Installs', icon: 'Download', url: '#installs', order: 7, internalView: 'installs' },
+];
+
+export const initialTeamsInvites: TeamsInvite[] = [
+  { id: 'teams-all', title: 'Flat Reality Entertainment Group', url: 'https://teams.live.com/l/community/FEAgOS8YPflSMWaag', audience: 'all', projects: [], memberIds: [] },
+  { id: 'teams-core', title: 'Coffe Station', url: 'https://teams.live.com/l/invite/FEAMAnz03-0b4eRcQ', audience: 'core', projects: [], memberIds: [] },
+  { id: 'teams-partners', title: "Partner's Roost", url: 'https://teams.live.com/l/invite/FEAIL5qqrx-b9a9qg', audience: 'targeted', projects: ['FR Partners'], memberIds: [] },
+  { id: 'teams-rain-heart', title: 'RAIN HEART', url: 'https://teams.live.com/l/invite/FEAweYLZksVwUrNhA', audience: 'targeted', projects: ['RAIN HEART'], memberIds: [] },
+  { id: 'teams-the-nick', title: 'The Nick', url: 'https://teams.live.com/l/invite/FEA_3a0pdom2NyUcg', audience: 'targeted', projects: ['The Nick'], memberIds: [] },
 ];
 
 export const initialFileProjects: FileProject[] = [
