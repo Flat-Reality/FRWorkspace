@@ -1288,7 +1288,7 @@ export default function App() {
             </div>
           )}
           {entraSetupStage === 'orbit' && (
-            <div className="entra-orbit-scene" aria-label="Инициализация Workspace">
+            <div className="entra-orbit-scene" aria-label="Initializing Workspace">
               <div className="entra-orbit-system">
                 <div className="entra-orbit-track">
                   {[
@@ -1304,7 +1304,7 @@ export default function App() {
                 </div>
                 <img className="entra-icon-pulse entra-orbit-center" src={ENTRA_ICON} alt="Microsoft Entra ID" />
               </div>
-              <p className="entra-initializing-label">Инициализация...</p>
+              <p className="entra-initializing-label">Initializing...</p>
             </div>
           )}
           {entraSetupStage === 'setup' && (
