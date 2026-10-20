@@ -86,7 +86,7 @@ export const initialRewards: Reward[] = [
 ];
 
 export const initialJumpLinks: JumpLink[] = [
-  { id: 'jump-team-access', title: 'Team Access', icon: 'Teams', url: '#team-access', order: 0, internalView: 'teamAccess' },
+  { id: 'jump-team-access', title: 'Teams Access', icon: 'Teams', url: '#team-access', order: 0, internalView: 'teamAccess' },
   { id: 'jump-1', title: 'Social Benefits', icon: 'HeartHandshake', url: 'https://tally.so/r/EkYpQq', order: 1 },
   { id: 'jump-4', title: 'Work Records', icon: 'ClipboardList', url: '#work-records', order: 2, internalView: 'workRecords' },
   { id: 'jump-6', title: 'Contact Head Office', icon: 'Building2', url: 'https://forms.office.com/r/LhHw6WFCgk', order: 3 },
