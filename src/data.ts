@@ -2,6 +2,11 @@ import type { FileProject, GuidePage, JumpLink, Level, Reward, TeamsInvite, Work
 
 export const benefitProgramOptions = ['FR Partners', 'The Nick', 'RAIN HEART'] as const;
 
+export const collectorBadges = [
+  { id: 'the-nick-founder-2025', name: 'THE NICK FOUNDER TEAM MEMBER 2025', image: 'resources/badges/THENICKBadge.png' },
+  { id: 'rain-heart-games-should-say-something', name: 'RAIN HEART - GAMES SHOULD SAY SOMETHING', image: 'resources/badges/RAINHEARTBadge.png' },
+] as const;
+
 export const emptyMember: WorkspaceMember = {
   id: '',
   employmentId: '',
@@ -64,6 +69,7 @@ export const emptyMember: WorkspaceMember = {
   },
   documents: [],
   issuedRewardIds: [],
+  collectorBadgeIds: [],
   xp: 0,
   status: 'active',
   statusUntil: '',

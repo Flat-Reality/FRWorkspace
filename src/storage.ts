@@ -39,6 +39,7 @@ function normalizeMember(member: Partial<WorkspaceMember>): WorkspaceMember {
     },
     documents: member.documents ?? [],
     issuedRewardIds: member.issuedRewardIds ?? [],
+    collectorBadgeIds: member.collectorBadgeIds ?? [],
     benefitPrograms: member.benefitPrograms ?? [],
     upworkUrl: member.upworkUrl ?? '',
     rate: member.rate ?? '',

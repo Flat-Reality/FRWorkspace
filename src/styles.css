@@ -796,3 +796,68 @@ button {
     transition: none;
   }
 }
+.collector-badge {
+  position: relative;
+  display: inline-flex;
+  width: 72px;
+  height: 72px;
+  flex: 0 0 72px;
+  border-radius: 6px;
+  outline-offset: 4px;
+}
+
+.collector-badge > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgb(127 0 255 / 18%));
+}
+
+.collector-badge::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 70%) 50%, transparent 65%);
+  background-size: 300% 100%;
+  mask: var(--badge-image) center / contain no-repeat;
+  animation: collector-badge-shine 5s ease-in-out infinite;
+}
+
+.collector-badge:nth-child(2)::after { animation-delay: 1s; }
+
+.collector-badge-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: min(260px, 70vw);
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #18181b;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 160ms ease, visibility 160ms ease;
+}
+
+.collector-badge:hover .collector-badge-tooltip,
+.collector-badge:focus .collector-badge-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+@keyframes collector-badge-shine {
+  0%, 55% { background-position: 100% 0; }
+  85%, 100% { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collector-badge::after { animation: none; background: none; }
+  .collector-badge-tooltip { transition: none; }
+}

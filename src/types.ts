@@ -257,6 +257,7 @@ export type WorkspaceMember = {
   };
   documents: MemberDocument[];
   issuedRewardIds: string[];
+  collectorBadgeIds?: string[];
   xp: number;
   status: MemberStatus;
   statusUntil: string;

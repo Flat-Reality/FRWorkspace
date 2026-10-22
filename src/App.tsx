@@ -66,7 +66,7 @@ import {
   WalletCards,
   Zap,
 } from 'lucide-react';
-import { benefitProgramOptions, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards, initialTeamsInvites } from './data';
+import { benefitProgramOptions, collectorBadges, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards, initialTeamsInvites } from './data';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
 import { acceptPolicyDocuments, checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getPolicyStatus, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, unenrollWorkspaceMember, updateRetainerInquiry } from './storage';
@@ -1947,6 +1947,16 @@ function MemberHero({ member, avatarUrl, compact = false }: { member: WorkspaceM
           <div className="mt-4 flex flex-wrap gap-2">
             {member.benefitPrograms.map((project) => <span key={project} className="inline-flex h-9 items-center rounded-full border border-line bg-mist px-3 text-sm font-semibold">{projectLabel(project)}</span>)}
           </div>
+          {collectorBadges.some((badge) => member.collectorBadgeIds?.includes(badge.id)) && (
+            <div className="mt-4 flex flex-wrap gap-3" aria-label="Collector badges">
+              {collectorBadges.filter((badge) => member.collectorBadgeIds?.includes(badge.id)).map((badge) => (
+                <span key={badge.id} className="collector-badge" tabIndex={0} aria-label={badge.name} style={{ '--badge-image': `url("${publicAsset(badge.image)}")` } as CSSProperties}>
+                  <img src={publicAsset(badge.image)} alt={badge.name} width={72} height={72} />
+                  <span className="collector-badge-tooltip" role="tooltip">{badge.name}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </section>
@@ -4064,6 +4074,17 @@ function AdminMemberLevelUpTab({ member, levels, rewards, updateMember }: { memb
               ))}
             </tbody>
           </table>
+        </div>
+      </Section>
+      <Section title="Collector Badges">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {collectorBadges.map((badge) => (
+            <label key={badge.id} className="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3">
+              <input type="checkbox" className="h-4 w-4 shrink-0 accent-[#7F00FF]" checked={member.collectorBadgeIds?.includes(badge.id) ?? false} onChange={(event) => updateMember({ collectorBadgeIds: event.target.checked ? [...new Set([...(member.collectorBadgeIds ?? []), badge.id])] : (member.collectorBadgeIds ?? []).filter((id) => id !== badge.id) })} />
+              <img className="h-14 w-14 shrink-0 object-contain" src={publicAsset(badge.image)} alt="" width={56} height={56} />
+              <span className="min-w-0 text-sm font-semibold">{badge.name}</span>
+            </label>
+          ))}
         </div>
       </Section>
     </div>
