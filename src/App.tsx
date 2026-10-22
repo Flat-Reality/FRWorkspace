@@ -67,6 +67,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { benefitProgramOptions, collectorBadges, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards, initialTeamsInvites } from './data';
+import { completedServiceYears } from './tenure';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
 import { acceptPolicyDocuments, checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getPolicyStatus, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, unenrollWorkspaceMember, updateRetainerInquiry } from './storage';
@@ -1932,6 +1933,14 @@ function memberStatusStyle(status: MemberStatus) {
 }
 
 function MemberHero({ member, avatarUrl, compact = false }: { member: WorkspaceMember; avatarUrl: string; compact?: boolean }) {
+  const [badgeDate, setBadgeDate] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setBadgeDate(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const serviceYears = completedServiceYears(member.workStartDate, badgeDate);
+  const serviceBadgeName = `${serviceYears} ${serviceYears === 1 ? 'YEAR' : 'YEARS'} AT FLAT REALITY`;
+  const serviceBadgeImage = publicAsset('resources/badges/ServiceYearsBadge.png');
   const status = memberStatusStyle(member.status);
   const StatusIcon = status.icon;
   return (
@@ -1947,8 +1956,15 @@ function MemberHero({ member, avatarUrl, compact = false }: { member: WorkspaceM
           <div className="mt-4 flex flex-wrap gap-2">
             {member.benefitPrograms.map((project) => <span key={project} className="inline-flex h-9 items-center rounded-full border border-line bg-mist px-3 text-sm font-semibold">{projectLabel(project)}</span>)}
           </div>
-          {collectorBadges.some((badge) => member.collectorBadgeIds?.includes(badge.id)) && (
+          {(serviceYears >= 1 || collectorBadges.some((badge) => member.collectorBadgeIds?.includes(badge.id))) && (
             <div className="mt-4 flex flex-wrap gap-3" aria-label="Collector badges">
+              {serviceYears >= 1 && (
+                <span className="collector-badge" tabIndex={0} aria-label={serviceBadgeName} style={{ '--badge-image': `url("${serviceBadgeImage}")` } as CSSProperties}>
+                  <img src={serviceBadgeImage} alt="" width={72} height={72} />
+                  <strong className="collector-badge-years" style={{ fontSize: serviceYears >= 100 ? 22 : serviceYears >= 10 ? 28 : 34 }} aria-hidden="true">{serviceYears}</strong>
+                  <span className="collector-badge-tooltip" role="tooltip">{serviceBadgeName}</span>
+                </span>
+              )}
               {collectorBadges.filter((badge) => member.collectorBadgeIds?.includes(badge.id)).map((badge) => (
                 <span key={badge.id} className="collector-badge" tabIndex={0} aria-label={badge.name} style={{ '--badge-image': `url("${publicAsset(badge.image)}")` } as CSSProperties}>
                   <img src={publicAsset(badge.image)} alt={badge.name} width={72} height={72} />

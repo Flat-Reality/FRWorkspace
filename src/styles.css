@@ -826,6 +826,20 @@ button {
 
 .collector-badge:nth-child(2)::after { animation-delay: 1s; }
 
+.collector-badge-years {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  line-height: 1;
+  color: #56dfff;
+  background: linear-gradient(135deg, #55f4ff 25%, #6490ff 45%, #cd67ff 65%, #ff8cf5 80%);
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 3px rgb(75 137 255 / 55%));
+}
+
 .collector-badge-tooltip {
   position: absolute;
   bottom: calc(100% + 8px);
