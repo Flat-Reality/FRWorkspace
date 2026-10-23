@@ -600,6 +600,20 @@ async function syncAllEntraMembers(state: WorkspaceState) {
   return warnings;
 }
 
+async function syncOutlookCalendar(): Promise<string[]> {
+  try {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/outlook-calendar-sync`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const payload = await response.json();
+    return response.ok ? (payload.warnings ?? []) : [payload.error || 'Outlook calendar synchronization failed.'];
+  } catch (error) {
+    return [error instanceof Error ? error.message : 'Outlook calendar synchronization failed.'];
+  }
+}
+
 async function syncAllUpworkData() {
   const response = await fetch(`${SUPABASE_URL}/functions/v1/upwork-oauth`, {
     method: 'POST',
@@ -951,6 +965,10 @@ Deno.serve(async (request) => {
       return json({ ok: true });
     }
 
+    if (action === 'scheduled_outlook_sync' && request.headers.get('Authorization') === `Bearer ${SERVICE_ROLE_KEY}`) {
+      return json(await syncOutlookCalendar());
+    }
+
     if (action === 'scheduled_sync' && request.headers.get('Authorization') === `Bearer ${SERVICE_ROLE_KEY}`) {
       const state = await loadState();
       const actor = state.members.find((member) => member.isAdmin) ?? state.members[0];
@@ -961,11 +979,12 @@ Deno.serve(async (request) => {
       const pendingAccess = await retryPendingAccessGroups(state);
       const reconciled = await reconcileAccessFromEntra(state, actor, pendingAccess.succeeded);
       const upworkWarnings = await syncAllUpworkData();
-      const warnings = [...profileWarnings, ...pendingAccess.warnings, ...reconciled.warnings, ...upworkWarnings, ...retainerWarnings];
+      const outlookWarnings = await syncOutlookCalendar();
+      const warnings = [...profileWarnings, ...pendingAccess.warnings, ...reconciled.warnings, ...upworkWarnings, ...retainerWarnings, ...outlookWarnings];
       await writeAuditLog({
         eventType: warnings.length ? 'system.scheduled_sync_partial' : 'system.scheduled_sync_completed',
         actor,
-        summary: 'Scheduled Workspace, Entra, GitHub and Upwork synchronization completed.',
+        summary: 'Scheduled Workspace, Entra, GitHub, Upwork and Outlook synchronization completed.',
         payload: { warnings },
       });
       return json({ ok: true, warnings });
@@ -1376,6 +1395,12 @@ Deno.serve(async (request) => {
       await auditStateChanges(context.state, nextState, context.actor);
       const entraSyncWarnings = context.actor.isAdmin ? await syncChangedEntraMembers(context.state, nextState, context.actor) : [];
       const accessSyncWarnings = context.actor.isAdmin ? await syncChangedAccessGroups(context.state, nextState, context.actor) : [];
+      const calendarInputs = (state: WorkspaceState) => JSON.stringify([state.scheduleShifts, state.members.map((member) => [member.id, member.entraObjectId, member.entraEmail, member.timeZone, member.status])]);
+      if (calendarInputs(context.state) !== calendarInputs(nextState)) {
+        const background = (globalThis as typeof globalThis & { EdgeRuntime?: { waitUntil: (task: Promise<unknown>) => void } }).EdgeRuntime;
+        if (background) background.waitUntil(syncOutlookCalendar());
+        else entraSyncWarnings.push(...await syncOutlookCalendar());
+      }
       return json({ state: scrubState(nextState, context.actor), entraSyncWarnings: [...entraSyncWarnings, ...accessSyncWarnings] });
     }
 

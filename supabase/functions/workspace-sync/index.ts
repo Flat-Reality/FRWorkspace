@@ -27,7 +27,7 @@ Deno.serve(async (request) => {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/workspace-api`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${SERVICE_ROLE_KEY}`, apikey: SERVICE_ROLE_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: requestBody?.retainerOnly ? 'scheduled_retainer_sync' : 'scheduled_sync' }),
+      body: JSON.stringify({ action: requestBody?.outlookOnly ? 'scheduled_outlook_sync' : requestBody?.retainerOnly ? 'scheduled_retainer_sync' : 'scheduled_sync' }),
     });
     const payload = await response.json().catch(() => ({}));
     return json(payload, response.status);
