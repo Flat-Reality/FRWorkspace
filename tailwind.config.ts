@@ -9,7 +9,7 @@ export default {
         mist: 'rgb(var(--color-mist) / <alpha-value>)',
         paper: 'rgb(var(--color-paper) / <alpha-value>)',
         line: 'rgb(var(--color-line) / <alpha-value>)',
-        forest: '#7F00FF',
+        forest: 'rgb(var(--color-forest) / <alpha-value>)',
         coral: '#d76d55',
         sky: '#4d7caa',
         amber: '#b9822f',
