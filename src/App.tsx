@@ -68,6 +68,7 @@ import {
 } from 'lucide-react';
 import { benefitProgramOptions, collectorBadges, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards, initialTeamsInvites } from './data';
 import { completedServiceYears } from './tenure';
+import { SeasonalIcon } from './SeasonalTheme';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
 import { acceptPolicyDocuments, checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getPolicyStatus, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, unenrollWorkspaceMember, updateRetainerInquiry } from './storage';
@@ -1362,7 +1363,7 @@ export default function App() {
                 }`}
                 onClick={() => setView(key)}
               >
-                <Icon size={18} />
+                <SeasonalIcon name={key} fallback={Icon} />
                 {label}
               </button>
             ))}
@@ -1465,7 +1466,7 @@ export default function App() {
             }`}
             onClick={() => setView(key)}
           >
-            <Icon size={18} />
+            <SeasonalIcon name={key} fallback={Icon} />
             <span>{key === 'schedule' ? 'Schedule' : label}</span>
           </button>
         ))}
@@ -1866,7 +1867,7 @@ function Dashboard({
             const content = (
               <>
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-mist text-zinc-700">
-                  {link.icon === 'Teams' ? <img className="h-6 w-6 object-contain" src={TEAMS_ICON} alt="" /> : <Icon size={19} />}
+                  <SeasonalIcon name={link.icon} fallback={Icon} size={19}>{link.icon === 'Teams' ? <img className="h-6 w-6 object-contain" src={TEAMS_ICON} alt="" /> : undefined}</SeasonalIcon>
                 </span>
                 <span className="font-medium">{link.title}</span>
               </>

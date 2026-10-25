@@ -1,0 +1,49 @@
+.halloween-theme {
+  color-scheme: dark;
+  --color-ink: 246 244 250;
+  --color-mist: 32 29 40;
+  --color-paper: 29 27 35;
+  --color-line: 106 96 119;
+  --shadow-soft: 0 16px 48px rgb(0 0 0 / 24%);
+  background: #171c20;
+}
+
+.halloween-theme #root { isolation: isolate; min-height: 100vh; }
+.halloween-theme #root > main { position: relative; z-index: 1; background: transparent; }
+
+.halloween-wallpaper { position: fixed; inset: 0; z-index: -1; pointer-events: none; background: #171c20; }
+.halloween-wallpaper :is(video, img) { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.halloween-wallpaper::after { content: ''; position: absolute; inset: 0; background: rgb(9 12 18 / 28%); }
+
+.halloween-theme :is(.bg-paper, .bg-white, [class*="bg-paper/"], [class*="bg-white/95"], [class*="bg-white/70"], .onboarding-progress) {
+  background-color: rgb(26 25 34 / 63%);
+  -webkit-backdrop-filter: blur(20px) saturate(135%);
+  backdrop-filter: blur(20px) saturate(135%);
+  border-color: rgb(225 218 240 / 18%);
+}
+
+.halloween-theme .bg-mist { background-color: rgb(245 236 255 / 7%); }
+.halloween-theme :is(.text-zinc-400, .text-zinc-500, .text-zinc-600, .text-zinc-700) { color: #cdc7d6; }
+.halloween-theme :is(input, select, textarea) { background-color: rgb(20 20 28 / 78%); color: #f6f4fa; }
+.halloween-theme :is(input, textarea)::placeholder { color: #b7aec2; }
+.halloween-theme select option { background: #24202c; color: #f6f4fa; }
+.halloween-theme .text-forest { color: #c5a5ff; }
+.halloween-theme .halloween-nav-icon { flex-shrink: 0; color: #ffbc77; filter: drop-shadow(0 0 5px rgb(255 156 65 / 18%)); }
+.halloween-theme .workspace-sidebar { box-shadow: inset 0 1px rgb(255 255 255 / 8%), var(--shadow-soft); }
+.halloween-theme .workspace-sidebar nav button:hover { background-color: rgb(255 190 125 / 10%); }
+.halloween-theme .onboarding-progress { background-image: none; }
+/* Opacity animations create backdrop roots and prevent acrylic from sampling the wallpaper. */
+.halloween-theme .workspace-sidebar,
+.halloween-theme .workspace-content > * { animation: none; }
+
+@supports not (backdrop-filter: blur(1px)) {
+  .halloween-theme :is(.bg-paper, .bg-white, [class*="bg-paper/"]) { background-color: rgb(26 25 34 / 94%); }
+}
+
+@media (max-width: 767px) {
+  .halloween-theme :is(.bg-paper, .bg-white, [class*="bg-paper/"]) {
+    background-color: rgb(26 25 34 / 76%);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+}
