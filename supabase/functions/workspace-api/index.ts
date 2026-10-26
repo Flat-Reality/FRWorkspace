@@ -1229,8 +1229,8 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'entra_devices') {
-      if (!context.actor.isAdmin) return json({ error: 'Admin access is required.' }, 403);
       const memberId = String(body.memberId ?? '');
+      if (!context.actor.isAdmin && context.actor.id !== memberId) return json({ error: 'You can only view your own devices.' }, 403);
       const target = context.state.members.find((member) => member.id === memberId);
       const userId = String(target?.entraObjectId || target?.entraEmail || '').trim();
       if (!target || !userId) return json({ devices: [] });

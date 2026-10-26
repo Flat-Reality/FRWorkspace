@@ -1598,12 +1598,38 @@ function hasOnboardingSkills(member: WorkspaceMember) {
   );
 }
 
-function onboardingChecklist(member: WorkspaceMember) {
+const DEVICE_REGISTRATION_HELP = 'https://support.microsoft.com/en-us/accounts-billing/work-school/register-your-personal-device-on-your-work-or-school-network';
+
+function useHasRegisteredDevice(member: WorkspaceMember) {
+  const [result, setResult] = useState<{ memberId: string; found: boolean } | null>(null);
+  useEffect(() => {
+    let active = true;
+    let loading = false;
+    async function check() {
+      const token = getStoredSession()?.token;
+      if (!token || (!member.entraEmail && !member.entraObjectId) || member.onboarding.completed || loading) return;
+      loading = true;
+      try {
+        const devices = await getEntraDevices(token, member.id);
+        if (active) setResult({ memberId: member.id, found: devices.length > 0 });
+      } catch { /* Keep the last confirmed result if Microsoft is temporarily unavailable. */ }
+      finally { loading = false; }
+    }
+    void check();
+    const timer = window.setInterval(() => { if (!document.hidden) void check(); }, 60_000);
+    window.addEventListener('focus', check);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', check); };
+  }, [member.id, member.entraEmail, member.entraObjectId, member.onboarding.completed]);
+  return result?.memberId === member.id && result.found;
+}
+
+function onboardingChecklist(member: WorkspaceMember, hasRegisteredDevice = false) {
   return [
     { id: 'entra', label: 'Microsoft Entra ID connected', done: Boolean(member.entraSetupCompleted) },
     { id: 'github', label: 'GitHub connected', done: Boolean(member.githubConnected) },
     { id: 'documents', label: 'NDA and GDPR signed', done: member.onboarding.ndaSigned && member.onboarding.gdprSigned },
     { id: 'skills', label: 'Skills, software or languages added', done: hasOnboardingSkills(member) },
+    { id: 'device', label: 'Register at least one device', done: hasRegisteredDevice },
   ];
 }
 
@@ -1646,7 +1672,8 @@ function Dashboard({
     if (isUpworkContract(member) && link.title === 'Contact Head Office') return false;
     return true;
   });
-  const onboardingSteps = onboardingChecklist(member);
+  const hasRegisteredDevice = useHasRegisteredDevice(member);
+  const onboardingSteps = onboardingChecklist(member, hasRegisteredDevice);
   const completedOnboardingSteps = onboardingSteps.filter((step) => step.done).length;
 
   async function beginGitHubConnection() {
@@ -1764,6 +1791,7 @@ function Dashboard({
                       </span>
                       <span className={step.done ? 'font-medium' : 'text-zinc-600'}>{step.label}</span>
                     </div>
+                    {step.id === 'device' && <a className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 text-sm font-semibold text-forest" href={DEVICE_REGISTRATION_HELP} target="_blank" rel="noopener noreferrer">Learn more<ExternalLink size={15} /></a>}
                     {step.id === 'github' && !step.done && (
                       <button type="button" disabled={isGitHubConnecting} onClick={() => void beginGitHubConnection()} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60">
                         <Github size={18} /> {isGitHubConnecting ? 'Connecting...' : 'Connect GitHub'}
@@ -3783,15 +3811,16 @@ function MemberEditor({
 }
 
 function OnboardingProgressCard({ member, updateMember }: { member: WorkspaceMember; updateMember: (changes: Partial<WorkspaceMember>) => void }) {
+  const hasRegisteredDevice = useHasRegisteredDevice(member);
   if (member.onboarding.completed) return null;
-  const steps = onboardingChecklist(member);
+  const steps = onboardingChecklist(member, hasRegisteredDevice);
   const ready = steps.every((step) => step.done);
   function confirm() {
     if (!ready) return;
     const xpBonus = member.onboarding.completedXpAwarded ? 0 : 100;
     updateMember({ onboarding: { ...member.onboarding, completed: true, completedXpAwarded: true }, xp: member.xp + xpBonus });
   }
-  return <section className="onboarding-progress overflow-hidden rounded-xl border border-forest/20 p-6 shadow-soft"><div className="flex flex-col justify-between gap-5 md:flex-row md:items-center"><div><p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Onboarding Journey</p><h2 className="mt-2 text-2xl font-semibold">Complete employee onboarding</h2><div className="mt-5 grid gap-3">{steps.map((step) => <div key={step.label} className="flex items-center gap-3"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${step.done ? 'bg-emerald-500 text-white' : 'border border-line bg-paper text-zinc-400'}`}>{step.done ? <Check size={15} /> : <span className="h-2 w-2 rounded-full bg-current" />}</span><span className={step.done ? 'font-medium' : 'text-zinc-500'}>{step.label}</span></div>)}</div></div><button disabled={!ready} className="h-11 rounded-lg bg-forest px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40" onClick={confirm}>Confirm completion · +100 XP</button></div></section>;
+  return <section className="onboarding-progress overflow-hidden rounded-xl border border-forest/20 p-6 shadow-soft"><div className="flex flex-col justify-between gap-5 md:flex-row md:items-center"><div><p className="text-sm font-semibold uppercase tracking-[0.14em] text-forest">Onboarding Journey</p><h2 className="mt-2 text-2xl font-semibold">Complete employee onboarding</h2><div className="mt-5 grid gap-3">{steps.map((step) => <div key={step.id} className="flex flex-wrap items-center gap-3"><span className={`flex h-7 w-7 items-center justify-center rounded-full ${step.done ? 'bg-emerald-500 text-white' : 'border border-line bg-paper text-zinc-400'}`}>{step.done ? <Check size={15} /> : <span className="h-2 w-2 rounded-full bg-current" />}</span><span className={step.done ? 'font-medium' : 'text-zinc-500'}>{step.label}</span>{step.id === 'device' && <a className="inline-flex items-center gap-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm font-semibold text-forest" href={DEVICE_REGISTRATION_HELP} target="_blank" rel="noopener noreferrer">Learn more<ExternalLink size={15} /></a>}</div>)}</div></div><button disabled={!ready} className="h-11 rounded-lg bg-forest px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40" onClick={confirm}>Confirm completion · +100 XP</button></div></section>;
 }
 
 function IntegrationBadge({ label, connected, icon }: { label: string; connected: boolean; icon: ReactNode }) {
