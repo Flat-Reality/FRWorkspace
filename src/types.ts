@@ -182,6 +182,7 @@ export type WorkRecord = {
 };
 
 export type MemberDocument = {
+  signingFields?: Array<{ id: string; label: string; required: boolean; type?: 'text' | 'email' | 'date'; value?: string }>;
   id: string;
   title: string;
   url: string;

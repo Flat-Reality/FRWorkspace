@@ -69,6 +69,7 @@ import {
 import { benefitProgramOptions, collectorBadges, emptyMember, initialFileProjects, initialGuidePages, initialJumpLinks, initialLevels, initialMembers, initialRewards, initialTeamsInvites } from './data';
 import { completedServiceYears } from './tenure';
 import { SeasonalIcon } from './SeasonalTheme';
+import { EOffice, pendingOfficeDocuments } from './EOffice';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { isSupabaseConfigured } from './supabase';
 import { acceptPolicyDocuments, checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getPolicyStatus, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, unenrollWorkspaceMember, updateRetainerInquiry } from './storage';
@@ -104,7 +105,7 @@ import type {
   WorkspaceState,
 } from './types';
 
-type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files' | 'teamAccess';
+type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files' | 'teamAccess' | 'eoffice';
 type AdminModule = 'home' | 'hr' | 'partners' | 'retainer' | 'guides' | 'levelup' | 'logs' | 'supabase' | 'teams';
 type HrTab = 'overview' | 'contact' | 'records' | 'access' | 'devices' | 'levelup' | 'payments' | 'documents' | 'careerGrowth' | 'partners' | 'experiments';
 type ProfileTab = 'profile' | 'contact' | 'payments' | 'skills' | 'integrations';
@@ -921,6 +922,7 @@ export default function App() {
           ['dashboard', LayoutDashboard, 'Home'],
           ...(currentMember?.scheduleEnabled ? ([['schedule', CalendarDays, 'Schedule β']] as Array<[View, LucideIcon, string]>) : []),
           ['guides', BookOpen, 'Guide'],
+          ['eoffice', FileCheck2, 'eOffice'],
           ['levelup', Trophy, 'LevelUp!'],
         ];
 
@@ -1365,6 +1367,7 @@ export default function App() {
               >
                 <SeasonalIcon name={key} fallback={Icon} />
                 {label}
+                {key === 'eoffice' && pendingOfficeDocuments(currentMember).length > 0 && <span className="ml-auto h-2.5 w-2.5 shrink-0 rounded-full bg-violet-600" aria-label={`${pendingOfficeDocuments(currentMember).length} pending requests`} />}
               </button>
             ))}
           </nav>
@@ -1430,6 +1433,7 @@ export default function App() {
           )}
           {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} setWorkRecords={updateWorkRecords} />}
           {view === 'signedDocuments' && <SignedDocuments member={currentMember} />}
+          {view === 'eoffice' && <EOffice member={currentMember} entraIconUrl={ENTRA_ICON} />}
           {view === 'files' && <FilesPage member={currentMember} fileProjects={fileProjects} setFileProjects={setFileProjects} />}
           {view === 'teamAccess' && (currentMember.status === 'suspended' ? <Placeholder title="Teams Access" text="This account no longer has access to team channels." /> : <TeamAccessPage member={currentMember} invites={teamsInvites} updateMember={updateCurrentMember} />)}
           {view === 'benefits' && <Placeholder title="Benefits" text="We are working on integrating this feature into Workspace!" />}
@@ -1900,6 +1904,7 @@ function Dashboard({
                 <span className="font-medium">{link.title}</span>
               </>
             );
+            if (link.title === 'Social Benefits') return <button key={link.id} type="button" className="flex min-h-20 items-center gap-4 rounded-xl border border-line bg-paper p-4 text-left shadow-soft">{content}</button>;
             if (link.internalView) {
               return (
                 <button key={link.id} className="flex min-h-20 items-center gap-4 rounded-xl border border-line bg-paper p-4 text-left shadow-soft transition hover:-translate-y-0.5" onClick={() => setView(link.internalView as View)}>
