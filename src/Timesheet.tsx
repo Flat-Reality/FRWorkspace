@@ -223,7 +223,7 @@ export function TimesheetPage({
               document.getElementById(`tab-${next}`)?.focus();
             }}
           >
-            {key === "timesheet" ? "Timesheet" : "Schedue"}
+            {key === "timesheet" ? "Timesheet" : "Schedule"}
           </button>
         ))}
       </div>

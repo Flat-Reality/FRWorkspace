@@ -3991,7 +3991,7 @@ function AdminScheduleTab({ member, updateMember }: { member: WorkspaceMember; u
         <p className="text-sm text-zinc-500">Enable experimental Workspace modules for this employee.</p>
         <label className="flex h-11 items-center gap-3 rounded-lg border border-line px-3 text-sm font-medium text-zinc-600">
           <input type="checkbox" checked={member.scheduleEnabled} onChange={(event) => updateMember({ scheduleEnabled: event.target.checked })} />
-          Enable Schedue tab in Timesheet (Beta)
+          Enable Schedule tab in Timesheet (Beta)
         </label>
       </Section>
     </div>

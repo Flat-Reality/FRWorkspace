@@ -1,6 +1,6 @@
 # Timesheet
 
-Timesheet is available to active Workspace members without an experiment flag. The sidebar retains the existing calendar icon and internal `schedule` view key. The **Schedue** tab contains the existing calendar and appears only when HR enables `scheduleEnabled` in Experiments.
+Timesheet is available to active Workspace members without an experiment flag. The sidebar retains the existing calendar icon and internal `schedule` view key. The **Schedule** tab contains the existing calendar and appears only when HR enables `scheduleEnabled` in Experiments.
 
 The timer persists its start and stop instants on the server. Seconds are retained; totals display `HH:MM` without rounding. Stop freezes the period and opens confirmation. Closing the dialog keeps a pending entry, which can be confirmed after navigation or reload. A GitHub issue URL is required unless **I don't have this link** is checked. The optional project picker contains only assigned projects. Manual entries reject future periods, overlaps and periods longer than 24 hours.
 

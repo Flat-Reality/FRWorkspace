@@ -84,7 +84,7 @@ export const supabase = { functions: { async invoke(name, { body }) {
   try {
     const { context, page } = await setup({ upwork: false, schedule: false });
     assert.equal(
-      await page.getByRole("tab", { name: "Schedue", exact: true }).count(),
+      await page.getByRole("tab", { name: "Schedule", exact: true }).count(),
       0,
     );
     await page
@@ -234,7 +234,7 @@ export const supabase = { functions: { async invoke(name, { body }) {
 
     const experimental = await setup({ upwork: false, schedule: true });
     await experimental.page
-      .getByRole("tab", { name: "Schedue", exact: true })
+      .getByRole("tab", { name: "Schedule", exact: true })
       .click();
     await experimental.page
       .getByText("SCHEDULE BETA", { exact: true })
@@ -267,7 +267,7 @@ export const supabase = { functions: { async invoke(name, { body }) {
       path: path.join(output, "upwork-dark.png"),
       fullPage: true,
     });
-    await uw.page.getByRole("tab", { name: "Schedue", exact: true }).click();
+    await uw.page.getByRole("tab", { name: "Schedule", exact: true }).click();
     assert.doesNotMatch(
       await uw.page.getByRole("tabpanel").innerText(),
       /999|\$|earnings/i,
