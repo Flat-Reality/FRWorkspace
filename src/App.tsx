@@ -71,6 +71,8 @@ import { completedServiceYears } from './tenure';
 import { SeasonalIcon } from './SeasonalTheme';
 import { EOffice, pendingOfficeDocuments } from './EOffice';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
+import { TimesheetPage } from './Timesheet';
+import { useTimesheet } from './useTimesheet';
 import { isSupabaseConfigured } from './supabase';
 import { acceptPolicyDocuments, checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getPolicyStatus, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, unenrollWorkspaceMember, updateRetainerInquiry } from './storage';
 import type { WorkspaceSession } from './storage';
@@ -856,6 +858,7 @@ export default function App() {
   }, [members, levels, rewards, guidePages, workRecords, scheduleShifts, scheduleCompletions, fileProjects, teamsInvites, isLoaded, policyGate]);
 
   const currentMember = members.find((member) => member.id === currentMemberId) ?? null;
+  const timesheet = useTimesheet(currentMember, isLoaded && policyGate === 'accepted' && currentMember?.status !== 'suspended');
 
   async function refreshUpwork(memberId = currentMemberId ?? '', force = false) {
     const token = getStoredSession()?.token;
@@ -920,7 +923,7 @@ export default function App() {
         ]
       : [
           ['dashboard', LayoutDashboard, 'Home'],
-          ...(currentMember?.scheduleEnabled ? ([['schedule', CalendarDays, 'Schedule β']] as Array<[View, LucideIcon, string]>) : []),
+          ['schedule', CalendarDays, 'Timesheet'],
           ['guides', BookOpen, 'Guide'],
           ['eoffice', FileCheck2, 'eOffice'],
           ['levelup', Trophy, 'LevelUp!'],
@@ -1421,15 +1424,15 @@ export default function App() {
           {view === 'profile' && <Profile member={currentMember} avatarUrl={entraAvatarUrl || upworkSnapshot.profile?.photoUrl || currentMember.githubAvatarUrl || ''} records={workRecords.filter((record) => record.memberId === currentMember.id)} upwork={upworkSnapshot} upworkStatus={upworkStatus} refreshUpwork={() => void refreshUpwork(currentMember.id, true)} updateCurrentMember={updateCurrentMember} onLogout={signOut} setView={setView} tab={profileTab} setTab={setProfileTab} />}
           {view === 'levelup' && <LevelUp member={currentMember} levels={levels} rewards={rewards} />}
           {view === 'careerGrowth' && <CareerGrowth member={currentMember} />}
-          {view === 'schedule' && currentMember.scheduleEnabled && (
-            <Schedule
+          {view === 'schedule' && (
+            <TimesheetPage key={currentMember.id} member={currentMember} upwork={upworkSnapshot} controller={timesheet} schedule={<Schedule
               member={currentMember}
               shifts={scheduleShifts.filter((shift) => shift.memberId === currentMember.id)}
               completions={scheduleCompletions.filter((completion) => completion.memberId === currentMember.id)}
               setScheduleShifts={setScheduleShifts}
               setScheduleCompletions={setScheduleCompletions}
               upwork={upworkSnapshot}
-            />
+            />} />
           )}
           {view === 'workRecords' && <WorkRecordsPage member={currentMember} records={workRecords.filter((record) => record.memberId === currentMember.id)} setWorkRecords={updateWorkRecords} />}
           {view === 'signedDocuments' && <SignedDocuments member={currentMember} />}
@@ -1471,7 +1474,7 @@ export default function App() {
             onClick={() => setView(key)}
           >
             <SeasonalIcon name={key} fallback={Icon} />
-            <span>{key === 'schedule' ? 'Schedule' : label}</span>
+            <span>{label}</span>
           </button>
         ))}
       </nav>
@@ -2726,8 +2729,6 @@ function UpworkSchedule({ member, upwork }: { member: WorkspaceMember; upwork: U
   const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const entries = upwork.timeEntries.filter((entry) => entry.date >= weekStart && entry.date <= addDays(weekStart, 6));
   const totalHours = entries.reduce((total, entry) => total + entry.hours, 0);
-  const totalCharges = entries.reduce((total, entry) => total + entry.charges, 0);
-  const currency = entries[0]?.currency ?? 'USD';
 
   return (
     <div className="grid gap-6">
@@ -2740,7 +2741,7 @@ function UpworkSchedule({ member, upwork }: { member: WorkspaceMember; upwork: U
               <h1 className="mt-2 text-3xl font-semibold md:text-5xl">{formatPlannerTime(totalHours)} tracked</h1>
             </div>
           </div>
-          <div className="text-right"><p className="text-sm text-zinc-500">Current week earnings</p><p className="mt-1 text-xl font-semibold">{formatUpworkMoney({ amount: totalCharges, currency })}</p></div>
+          <span className="text-sm text-zinc-500">{formatDate(weekStart)} – {formatDate(addDays(weekStart, 6))}</span>
         </div>
       </section>
       <section className="animate-panel overflow-x-auto rounded-xl border border-line bg-paper p-4 shadow-soft">
@@ -2759,7 +2760,7 @@ function UpworkSchedule({ member, upwork }: { member: WorkspaceMember; upwork: U
                   {dayEntries.map((entry) => (
                     <article key={entry.id} className="rounded-lg border border-line bg-mist p-3">
                       <p className="text-sm font-semibold">{entry.contractTitle || 'Upwork contract'}</p>
-                      <p className="mt-2 text-xs text-zinc-500">{formatPlannerTime(entry.hours)} · {formatUpworkMoney({ amount: entry.charges, currency: entry.currency })}</p>
+                      <p className="mt-2 text-xs text-zinc-500">{formatPlannerTime(entry.hours)}</p>
                       {entry.memo && <p className="mt-2 text-xs leading-5 text-zinc-600">{entry.memo}</p>}
                     </article>
                   ))}
@@ -3990,7 +3991,7 @@ function AdminScheduleTab({ member, updateMember }: { member: WorkspaceMember; u
         <p className="text-sm text-zinc-500">Enable experimental Workspace modules for this employee.</p>
         <label className="flex h-11 items-center gap-3 rounded-lg border border-line px-3 text-sm font-medium text-zinc-600">
           <input type="checkbox" checked={member.scheduleEnabled} onChange={(event) => updateMember({ scheduleEnabled: event.target.checked })} />
-          Enable Schedule Module (Beta)
+          Enable Schedue tab in Timesheet (Beta)
         </label>
       </Section>
     </div>

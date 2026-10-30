@@ -1,5 +1,7 @@
 import { emptyMember, initialFileProjects, initialGuidePages, initialLevels, initialMembers, initialRewards, initialTeamsInvites, initialWorkRecords } from './data';
 import { supabase } from './supabase';
+import { applyTimeCommand, emptyTimesheet } from '../supabase/functions/_shared/timesheet';
+import type { TimeCommand, Timesheet } from '../supabase/functions/_shared/timesheet';
 import type { AuditLogEntry, EntraDevice, FileProject, FileResource, GitHubSnapshot, RetainerOffering, RetainerSnapshot, ScheduleDayCompletion, ScheduleShift, UpworkContractDraft, UpworkSnapshot, WorkspaceMember, WorkspaceState } from './types';
 
 const STORAGE_KEY = 'flat-reality-workspace-state';
@@ -401,6 +403,23 @@ export async function loadWorkspaceState(sessionToken?: string): Promise<Workspa
   } catch {
     return defaultWorkspaceState;
   }
+}
+
+export async function updateTimesheet(member: WorkspaceMember, command: TimeCommand, sessionToken?: string): Promise<Timesheet> {
+  if (supabase) {
+    if (!sessionToken) throw new Error('Sign in again to access your timesheet.');
+    const result = await callWorkspaceApi<{ timesheet: Timesheet }>({ action: 'timesheet', sessionToken, command });
+    return result.timesheet;
+  }
+  const change = () => {
+    const key = `flat-reality-timesheet:${member.id}`;
+    const raw = window.localStorage.getItem(key);
+    const current: Timesheet = raw ? JSON.parse(raw) : emptyTimesheet();
+    const next = applyTimeCommand(current, command, { upwork: member.onboarding.contractType === 'UPWORK CONTRACT', projects: member.benefitPrograms });
+    if (next !== current) window.localStorage.setItem(key, JSON.stringify(next));
+    return next;
+  };
+  return navigator.locks ? navigator.locks.request(`timesheet:${member.id}`, change) : change();
 }
 
 export async function saveWorkspaceState(state: WorkspaceState, sessionToken?: string) {

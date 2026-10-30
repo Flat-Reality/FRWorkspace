@@ -6,3 +6,4 @@ dist
 .env.production.local
 .DS_Store
 work/npm-cache
+outputs/timesheet/

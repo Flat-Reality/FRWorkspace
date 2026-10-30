@@ -1,4 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import { timesheetAction } from './timesheet-store.ts';
+import type { TimeCommand } from '../_shared/timesheet.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -1142,6 +1144,15 @@ Deno.serve(async (request) => {
     if (consentRequired) return json({ error: 'Accept the updated policies before opening Workspace.', consentRequired: true }, 403);
     if (context.actor.status === 'suspended' && !['load', 'save', 'entra_avatar'].includes(action)) {
       return json({ error: 'Only limited profile access is available for this account.' }, 403);
+    }
+
+    if (action === 'timesheet') {
+      try {
+        const timesheet = await timesheetAction(supabase, context.actor, body.command as TimeCommand);
+        return json({ timesheet });
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : 'Timesheet could not be saved.' }, 400);
+      }
     }
 
     if (action === 'retainer_snapshot') {
