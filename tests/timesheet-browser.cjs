@@ -115,6 +115,9 @@ export const supabase = { functions: { async invoke(name, { body }) {
       .click();
     const dialog = page.getByRole("dialog");
     await dialog.waitFor();
+    assert.match(await page.title(), /Tracking/);
+    await page.clock.fastForward(65000);
+    assert.match(await page.title(), /00:01/);
     assert.equal(
       await page.evaluate(
         () => window.__sounds.filter((x) => x.includes("confirm")).length,
@@ -129,7 +132,7 @@ export const supabase = { functions: { async invoke(name, { body }) {
       .getByRole("button", { name: "Timesheet", exact: true })
       .first()
       .click();
-    await page.getByRole("button", { name: "Review tracked time" }).click();
+    await page.getByRole("button", { name: "Stop tracking", exact: true }).click();
     await page
       .getByRole("checkbox", { name: "I don't have this link" })
       .check();

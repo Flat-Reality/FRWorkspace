@@ -22,7 +22,7 @@ const manual = (id, start, end, extra = {}) => ({
   ...extra,
 });
 
-test("timer preserves seconds, freezes on stop, survives retry, confirms once", () => {
+test("timer keeps running through stop and validation, ends at confirmation, confirms once", () => {
   let state = apply(emptyTimesheet(), { kind: "start", id: "one" }, actor, now);
   assert.equal(
     apply(state, { kind: "start", id: "one" }, actor, now + 1000),
@@ -32,13 +32,9 @@ test("timer preserves seconds, freezes on stop, survives retry, confirms once", 
     () => apply(state, { kind: "start", id: "two" }, actor, now),
     /Finish/,
   );
-  assert.throws(
-    () =>
-      apply(state, { kind: "confirm", id: "one", noIssue: true }, actor, now),
-    /Stop/,
-  );
   state = apply(state, { kind: "stop", id: "one" }, actor, now + 61950);
   assert.equal(state.entries.length, 0);
+  assert.equal(state.timer.end, undefined);
   assert.equal(
     apply(state, { kind: "stop", id: "one" }, actor, now + 90000),
     state,
@@ -59,7 +55,7 @@ test("timer preserves seconds, freezes on stop, survives retry, confirms once", 
     now + 90000,
   );
   assert.equal(state.timer, null);
-  assert.equal(secondsWithin(state.entries[0], -Infinity, Infinity), 61.95);
+  assert.equal(secondsWithin(state.entries[0], -Infinity, Infinity), 90);
   assert.equal(formatTime(61.95), "00:01");
   assert.equal(
     apply(state, { kind: "confirm", id: "one" }, actor, now + 100000),
@@ -255,5 +251,5 @@ test("database isolates members and compare-and-swap allows only one concurrent 
     3,
     "Concurrent saves must keep both entries",
   );
-  assert.equal(db.rows.get("alice").revision, 5);
+  assert.equal(db.rows.get("alice").revision, 4);
 });

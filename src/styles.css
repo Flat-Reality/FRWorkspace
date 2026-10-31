@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes tracking-button-enter {
+  from { opacity: 0.4; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+.tracking-button-transition { animation: tracking-button-enter 280ms ease-out; transition: background-color 280ms, box-shadow 280ms; }
+@media (prefers-reduced-motion: reduce) {
+  .tracking-button-transition { animation: none; transition: none; }
+}
+
 * {
   box-sizing: border-box;
 }

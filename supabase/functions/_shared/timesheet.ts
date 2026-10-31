@@ -49,24 +49,15 @@ export function applyTimeCommand(
   if (command.kind === "stop") {
     if (state.timer?.id !== command.id)
       throw new Error("This timer is no longer active. Refresh and try again.");
-    if (state.timer.end) return state;
-    return {
-      ...state,
-      timer: {
-        ...state.timer,
-        end: new Date(
-          Math.max(now, Date.parse(state.timer.start) + 1),
-        ).toISOString(),
-      },
-    };
+    return state; // Stop opens the memo; only confirmation ends tracking.
   }
   if (command.kind !== "confirm" && command.kind !== "manual")
     throw new Error("Unknown timesheet action.");
   const timer = command.kind === "confirm" ? state.timer : null;
-  if (command.kind === "confirm" && (!timer?.end || timer.id !== command.id))
-    throw new Error("Stop the timer before confirming.");
+  if (command.kind === "confirm" && (!timer || timer.id !== command.id))
+    throw new Error("This timer is no longer active.");
   const start = Date.parse(timer?.start ?? command.start ?? "");
-  const end = Date.parse(timer?.end ?? command.end ?? "");
+  const end = timer ? Math.max(now, start + 1) : Date.parse(command.end ?? "");
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
     throw new Error("End time must be after start time.");
   if (end > now + 1000)

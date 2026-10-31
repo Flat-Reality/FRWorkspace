@@ -173,8 +173,7 @@ export function TimesheetPage({
   }, [member.scheduleEnabled]);
 
   async function stop() {
-    if (timer && (await c.execute({ kind: "stop", id: timer.id })))
-      setModal("tracked");
+    if (timer) setModal("tracked");
   }
   return (
     <div className="grid gap-6">
@@ -321,7 +320,8 @@ export function TimesheetPage({
                     </button>
                   ) : (
                     <button
-                      className={`${button} min-w-44 ${running ? "bg-ink text-paper" : "bg-forest text-white"}`}
+                      key={running ? 'running' : 'idle'}
+                      className={`${button} tracking-button-transition min-w-44 ${running ? "bg-ink text-paper" : "bg-forest text-white"}`}
                       disabled={!c.ready || c.busy}
                       onClick={() =>
                         running
@@ -742,7 +742,7 @@ function TimeDialog({
       : zonedInstant(startDate, from, zone);
   const end =
     mode === "tracked"
-      ? Date.parse(c.data.timer?.end ?? "")
+      ? Date.parse(c.data.timer?.end ?? new Date(c.now).toISOString())
       : zonedInstant(endDate, to, zone);
   async function confirm() {
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
