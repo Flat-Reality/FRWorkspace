@@ -15,14 +15,17 @@ Deno.serve(async request => {
   try {
     const token = await db.rpc('get_workspace_sync_cron_token');
     if (token.error || !equal(request.headers.get('x-workspace-sync-token') || '', String(token.data || ''))) return json({ error: 'Unauthorized.' }, 401);
+    const testOnly = (await request.json().catch(() => ({}))).testOnly === true;
     const settings = await db.from('workspace_email_settings').select('enabled').eq('id', true).maybeSingle();
     if (settings.error) throw settings.error;
-    if (!settings.data?.enabled) return json({ enabled: false });
+    if (!settings.data?.enabled && !testOnly) return json({ enabled: false });
     const user = Deno.env.get('WORKSPACE_SMTP_USERNAME'), pass = Deno.env.get('WORKSPACE_SMTP_PASSWORD');
     if (!user || !pass) return json({ error: 'SMTP is not configured; no XP or emails processed.' }, 503);
-    const scheduled = await db.rpc('workspace_email_schedule');
-    if (scheduled.error) throw scheduled.error;
-    const claimed = await db.rpc('workspace_email_claim');
+    if (!testOnly) {
+      const scheduled = await db.rpc('workspace_email_schedule');
+      if (scheduled.error) throw scheduled.error;
+    }
+    const claimed = testOnly ? await db.rpc('workspace_email_claim', { p_test_only: true }) : await db.rpc('workspace_email_claim');
     if (claimed.error) throw claimed.error;
     const transport = nodemailer.createTransport({ host: 'smtp.purelymail.com', port: 465, secure: true, auth: { user, pass }, connectionTimeout: 8000, greetingTimeout: 8000, socketTimeout: 12000, tls: { minVersion: 'TLSv1.2' } });
     let sent = 0;
