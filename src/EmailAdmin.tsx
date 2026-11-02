@@ -23,7 +23,7 @@ export function EmailAdmin({ members, sessionToken, onBack }: { members: Workspa
   const requestId = useRef(crypto.randomUUID());
   const eligible = members.filter(m => m.status !== 'suspended' && (m.entraEmail || m.personalEmail));
   const content: EmailContent = { kind, name: 'Alex', ...(kind === 'announcement' ? { title: title || 'Workspace announcement', message: message || 'Your update from Flat Reality will appear here.' } : {}), ...(until ? { until } : {}), ...(kind === 'monthly_summary' ? { period: 'October 2026', hours: 42.5, xp: 50, totalXp: 250 } : {}) };
-  const preview = renderWorkspaceEmail(content, `${window.location.origin}${import.meta.env.BASE_URL}`);
+  const preview = renderWorkspaceEmail(content, new URL(import.meta.env.BASE_URL, window.location.href).href);
   async function api<T>(command: string, values: Record<string, unknown> = {}) {
     if (!sessionToken) throw new Error('Sign in to the connected Workspace to manage email.');
     return callWorkspaceApi<T>({ action: 'email', command, sessionToken, ...values });
