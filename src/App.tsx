@@ -72,6 +72,7 @@ import { SeasonalIcon } from './SeasonalTheme';
 import { EOffice, pendingOfficeDocuments } from './EOffice';
 import { HrOnboardingWizard } from './HrOnboardingWizard';
 import { TimesheetPage } from './Timesheet';
+import { EmailAdmin } from './EmailAdmin';
 import { useTimesheet } from './useTimesheet';
 import { isSupabaseConfigured } from './supabase';
 import { acceptPolicyDocuments, checkRecoveryOptions as checkRecoveryOptionsServer, completeEntraSetup, connectGitHub, connectSteam, connectUpwork, createUpworkContract, defaultWorkspaceState, disconnectGitHub, disconnectSteam, disconnectUpwork, getEntraAvatar, getEntraDevices, getEntraWorkspaceLogin, getGitHubSnapshot, getPolicyStatus, getRetainerSnapshot, getSteamSnapshot, getUpworkSnapshot, impersonateWorkspaceMember, listWorkspaceAuditLogs, loadWorkspaceState, loginWorkspace, recoverWorkspacePassword, resetWorkspacePassword, saveRetainerOffering, saveWorkspaceState, signOutEntra, startEntraLogin, unenrollWorkspaceMember, updateRetainerInquiry } from './storage';
@@ -108,7 +109,7 @@ import type {
 } from './types';
 
 type View = 'dashboard' | 'profile' | 'levelup' | 'admin' | 'guides' | 'workRecords' | 'signedDocuments' | 'benefits' | 'installs' | 'careerGrowth' | 'schedule' | 'files' | 'teamAccess' | 'eoffice';
-type AdminModule = 'home' | 'hr' | 'partners' | 'retainer' | 'guides' | 'levelup' | 'logs' | 'supabase' | 'teams';
+type AdminModule = 'home' | 'hr' | 'partners' | 'retainer' | 'guides' | 'levelup' | 'logs' | 'supabase' | 'teams' | 'email';
 type HrTab = 'overview' | 'contact' | 'records' | 'access' | 'devices' | 'levelup' | 'payments' | 'documents' | 'careerGrowth' | 'partners' | 'experiments';
 type ProfileTab = 'profile' | 'contact' | 'payments' | 'skills' | 'integrations';
 type WorkspaceUpdate = (nextMembers: WorkspaceMember[], nextRecords?: WorkRecord[]) => void;
@@ -3505,6 +3506,7 @@ function Admin({
   if (module === 'guides') return <AdminGuides guidePages={guidePages} setGuidePages={setGuidePages} onBack={() => setModule('home')} />;
   if (module === 'levelup') return <AdminLevels levels={levels} rewards={rewards} setLevels={setLevels} setRewards={setRewards} onBack={() => setModule('home')} />;
   if (module === 'logs') return <AdminLogs members={members} onBack={() => setModule('home')} />;
+  if (module === 'email') return <EmailAdmin members={members} sessionToken={getStoredSession()?.token} onBack={() => setModule('home')} />;
   if (module === 'teams') return <TeamsInvitesAdmin members={members} invites={teamsInvites} setInvites={setTeamsInvites} onBack={() => setModule('home')} />;
 
   const modules: Array<[AdminModule, LucideIcon, string, string]> = [
@@ -3514,6 +3516,7 @@ function Admin({
     ['guides', BookOpen, 'Guide Writting', 'Create and edit workspace guide pages.'],
     ['levelup', Trophy, 'LevelUp! Configurator', 'Configure levels, XP requirements and rewards.'],
     ['logs', FileText, 'Logs', 'Review sessions, profile changes and workspace data edits.'],
+    ['email', Mail, 'Workspace Email', 'Email templates, HR notifications, monthly summaries and Announcements.'],
     ['teams', UsersRound, 'Teams Invites', 'Manage additional channel invitations by project or person.'],
     ['supabase', ExternalLink, 'Supabase Control', 'Open the connected Supabase project dashboard.'],
   ];

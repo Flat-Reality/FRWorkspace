@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Workspace Email — local QA</title></head><body style="margin:0"><div id="root"></div><script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { EmailAdmin } from '/src/EmailAdmin.tsx';
+import '/src/styles.css';
+const members = [{ id:'qa-admin', fullName:'Taylor Morgan', preferredName:'Taylor', entraEmail:'taylor@example.org', status:'active' }, { id:'qa-member', fullName:'Alex Doe', preferredName:'Alex', personalEmail:'alex@example.org', status:'active' }];
+createRoot(document.getElementById('root')).render(React.createElement('main',{className:'mx-auto max-w-7xl p-6'},React.createElement(EmailAdmin,{ members, sessionToken:'local-qa-only', onBack:()=>{} })));
+</script></body></html>

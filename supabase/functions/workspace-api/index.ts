@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 import { timesheetAction } from './timesheet-store.ts';
+import { emailAdmin } from './email-admin.ts';
 import type { TimeCommand } from '../_shared/timesheet.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
@@ -1144,6 +1145,13 @@ Deno.serve(async (request) => {
     if (consentRequired) return json({ error: 'Accept the updated policies before opening Workspace.', consentRequired: true }, 403);
     if (context.actor.status === 'suspended' && !['load', 'save', 'entra_avatar'].includes(action)) {
       return json({ error: 'Only limited profile access is available for this account.' }, 403);
+    }
+
+    if (action === 'email') {
+      if (!context.actor.isAdmin) return json({ error: 'Administrator access is required.' }, 403);
+      const result = await emailAdmin(supabase, context.actor, context.state.members, body);
+      if (['settings', 'announce', 'sabbatical', 'test', 'cancel'].includes(String(body.command))) await writeAuditLog({ eventType: `email.${body.command}`, actor: context.actor, summary: `Workspace email ${body.command}.` });
+      return json(result);
     }
 
     if (action === 'timesheet') {

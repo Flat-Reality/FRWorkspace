@@ -58,6 +58,10 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 
 For the current MVP, the app stores workspace data in `workspace_state` as one JSON document. This keeps the setup simple. Later, it can be migrated into separate normalized tables with real Supabase Authentication and row-level security.
 
+## Workspace Email
+
+Admin → Workspace Email provides branded HR notifications, internal Announcements, onboarding reminders and monthly LevelUp! summaries. Sender: `FLAT REALITY ENTERTAINMENT GROUP <hr@flatreality.eu>`. See [mail setup and activation](docs/EMAIL.md). Delivery stays disabled until the private database migration, SMTP secrets and admin settings are configured. Sick pay is a preview/test template only.
+
 ## Deploy
 
 The project includes `.github/workflows/deploy-pages.yml`, so GitHub can publish the site automatically when changes are pushed to `main`.

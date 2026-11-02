@@ -7,3 +7,5 @@ dist
 .DS_Store
 work/npm-cache
 outputs/timesheet/
+work/email-tools/
+outputs/email/
